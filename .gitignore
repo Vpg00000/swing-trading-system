@@ -1,0 +1,46 @@
+# Aider
+.aider*
+.aider/
+
+# Environment / secrets
+.env
+.env.*
+!.env.example
+
+# Python
+__pycache__/
+*.py[cod]
+*.pyo
+*.pyd
+.venv/
+venv/
+env/
+*.egg-info/
+
+# macOS
+.DS_Store
+
+# Logs
+logs/
+*.log
+
+# Local/generated data
+data/
+scratch/
+reports/
+
+# Local configuration / secrets
+config/local/
+config/*.local.*
+config/*secret*
+config/*credentials*
+
+# IDE
+.vscode/
+.idea/
+
+# OS / temporary files
+*.tmp
+*.temp
+*.swp
+*.swo

@@ -1,0 +1,413 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Swing Trading System - Command Center</title>
+    <!-- Use static path mapped to /static/... -->
+    <link rel="stylesheet" href="/static/style.css">
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.0/css/all.min.css">
+    <link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@300;400;500;600;700&family=Space+Grotesk:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+</head>
+<body>
+
+    <!-- Header -->
+    <header class="header">
+        <div class="header-brand"><span class="text-mint">Swing</span>Momentum <span class="header-sub">Command Center</span></div>
+        <div class="header-status">
+            <span class="status-badge inactive" id="dhanStatusBadge"><i class="fa-solid fa-link-slash"></i> DHAN STUB</span>
+        </div>
+        <div class="header-market font-mono text-xs" id="marketData">
+            <span>NIFTY <span class="text-mint font-bold" id="niftyVal">--</span></span>
+            <span>VIX <span class="text-amber font-bold" id="vixVal">--</span></span>
+        </div>
+        <button class="refresh-btn" id="refreshBtn" title="Re-run API calculations (takes ~5-10s)">
+            <i class="fa-solid fa-arrows-rotate"></i> RE-RUN PIPELINE
+        </button>
+    </header>
+
+    <!-- Main Container -->
+    <div class="main-layout">
+        
+        <!-- Left Sidebar Navigation -->
+        <nav class="sidebar">
+            <button class="nav-btn" data-tab="overview">
+                <i class="fa-solid fa-gauge-high"></i> Overview
+            </button>
+            <button class="nav-btn active" data-tab="screener">
+                <i class="fa-solid fa-filter"></i> Stock Screener Grid
+            </button>
+            <button class="nav-btn" data-tab="insights">
+                <i class="fa-solid fa-chart-line"></i> Market Insights
+            </button>
+            <button class="nav-btn" data-tab="allocation">
+                <i class="fa-solid fa-chart-pie"></i> Allocation & Drift
+            </button>
+            <button class="nav-btn" data-tab="candidates">
+                <i class="fa-solid fa-bullseye"></i> Candidates & Actions
+            </button>
+            <button class="nav-btn" data-tab="prompts">
+                <i class="fa-solid fa-terminal"></i> Claude Prompts
+            </button>
+            <button class="nav-btn" data-tab="raw">
+                <i class="fa-solid fa-file-invoice"></i> Text Report
+            </button>
+            <button class="nav-btn" data-tab="health">
+                <i class="fa-solid fa-shield-halved"></i> Data Health
+            </button>
+        </nav>
+
+        <!-- Main Content Area -->
+        <main class="content-view">
+            
+            <!-- OVERVIEW TAB -->
+            <div id="overview" class="tab-pane">
+                <div class="overview-grid">
+                    
+                    <!-- Regime Gauge Card -->
+                    <div class="card regime-card">
+                        <div class="card-header">Market Regime Score</div>
+                        <div class="gauge-container">
+                            <svg class="gauge" viewBox="0 0 100 50">
+                                <path class="gauge-bg" d="M 10 50 A 40 40 0 0 1 90 50"></path>
+                                <path class="gauge-fill" id="regimeGaugeFill" d="M 10 50 A 40 40 0 0 1 90 50" stroke-dasharray="125.6" stroke-dashoffset="125.6"></path>
+                            </svg>
+                            <div class="gauge-val" id="regimeScoreVal">--</div>
+                            <div class="gauge-label" id="regimeStateVal">UNKNOWN</div>
+                        </div>
+                        <div class="regime-notes" id="regimeNotes">Evaluating...</div>
+                    </div>
+
+                    <!-- Macro Summary Card -->
+                    <div class="card">
+                        <div class="card-header">Capital Summary</div>
+                        <div class="capital-stats">
+                            <div class="stat-row">
+                                <span class="stat-label">Total Capital</span>
+                                <span class="stat-value text-mint" id="capTotal">₹--</span>
+                            </div>
+                            <div class="stat-row">
+                                <span class="stat-label">Cash Balance</span>
+                                <span class="stat-value" id="capCash">₹--</span>
+                            </div>
+                            <div class="stat-row">
+                                <span class="stat-label">Invested Capital</span>
+                                <span class="stat-value" id="capInvested">₹--</span>
+                            </div>
+                            <div class="stat-row">
+                                <span class="stat-label">Max Equity Limit</span>
+                                <span class="stat-value text-amber" id="capMaxEquity">--%</span>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- Multi-factor Subscores Card -->
+                    <div class="card subscores-card">
+                        <div class="card-header">Multi-Factor Regime Details</div>
+                        <div class="meter-list" id="regimeSubscores">
+                            <!-- Populated dynamically -->
+                        </div>
+                    </div>
+
+                </div>
+            </div>
+
+            <!-- ALLOCATION TAB -->
+            <div id="allocation" class="tab-pane">
+                <div class="card">
+                    <div class="card-header">Sleeve Allocation & Drift</div>
+                    <div class="table-container">
+                        <table class="data-table" id="driftTable">
+                            <thead>
+                                <tr>
+                                    <th>Sleeve</th>
+                                    <th>Target %</th>
+                                    <th>Target Value</th>
+                                    <th>Actual %</th>
+                                    <th>Actual Value</th>
+                                    <th>Drift %</th>
+                                    <th>Drift Value</th>
+                                </tr>
+                            </thead>
+                            <tbody>
+                                <!-- Populated dynamically -->
+                            </tbody>
+                        </table>
+                    </div>
+                </div>
+
+                <div class="card margin-top">
+                    <div class="card-header">Current Holdings Detailed Reconciliation</div>
+                    <div class="table-container">
+                        <table class="data-table" id="holdingsTable">
+                            <thead>
+                                <tr>
+                                    <th>Symbol</th>
+                                    <th>Sleeve</th>
+                                    <th>Status</th>
+                                    <th>Current Value</th>
+                                    <th>Drift</th>
+                                    <th>Tax Class</th>
+                                    <th>Days Held</th>
+                                    <th>Gain/Loss %</th>
+                                    <th>Est. Tax</th>
+                                </tr>
+                            </thead>
+                            <tbody>
+                                <!-- Populated dynamically -->
+                            </tbody>
+                        </table>
+                    </div>
+                </div>
+
+                <div id="taxHarvestingContainer" class="card margin-top hidden">
+                    <div class="card-header text-amber"><i class="fa-solid fa-scale-balanced"></i> Tax & Loss Harvesting Alerts</div>
+                    <div class="alerts-list" id="taxAlerts">
+                        <!-- Populated dynamically -->
+                    </div>
+                </div>
+            </div>
+
+            <!-- CANDIDATES TAB -->
+            <div id="candidates" class="tab-pane">
+                <div class="candidates-toolbar">
+                    <h2>Top Momentum Candidates & Recommendations</h2>
+                    <div class="actions-summary" id="actionsSummary">
+                        <!-- Summary list of today's recommended trades -->
+                    </div>
+                </div>
+                <div class="candidates-list" id="candidatesList">
+                    <!-- Populated dynamically -->
+                </div>
+            </div>
+
+            <!-- PROMPTS TAB -->
+            <div id="prompts" class="tab-pane">
+                <div class="prompts-layout">
+                    <!-- Prompts sidebar -->
+                    <div class="prompts-list-panel">
+                        <h2>Saved Claude Research Files</h2>
+                        <div class="prompt-buttons" id="promptsList">
+                            <!-- List of prompt file names -->
+                        </div>
+                    </div>
+                    <!-- Prompt content -->
+                    <div class="prompt-content-panel">
+                        <div class="prompt-header" id="promptHeader">
+                            <span class="prompt-title font-mono" id="activePromptTitle">Select a prompt file</span>
+                            <button class="copy-btn hidden" id="copyPromptBtn">
+                                <i class="fa-solid fa-copy"></i> COPY PROMPT
+                            </button>
+                        </div>
+                        <pre class="prompt-body font-mono" id="activePromptBody">Select a file from the list to preview its contents. Copy and paste it directly into Claude to run the qualitative research pass.</pre>
+                    </div>
+                </div>
+            </div>
+
+            <!-- RAW REPORT TAB -->
+            <div id="raw" class="tab-pane">
+                <div class="raw-report-header">
+                    <h2>Formatted Daily Command Center Text Report</h2>
+                    <button class="copy-btn" id="copyReportBtn"><i class="fa-solid fa-copy"></i> COPY REPORT</button>
+                </div>
+                <pre class="raw-report-body font-mono" id="rawReportText">Loading daily report...</pre>
+            </div>
+
+            <!-- HEALTH TAB -->
+            <div id="health" class="tab-pane">
+                <div class="card">
+                    <div class="card-header">Data Pipeline API Health Check</div>
+                    <div class="table-container">
+                        <table class="data-table" id="healthTable">
+                            <thead>
+                                <tr>
+                                    <th>Pipeline Segment</th>
+                                    <th>Status</th>
+                                </tr>
+                            </thead>
+                            <tbody>
+                                <!-- Populated dynamically -->
+                            </tbody>
+                        </table>
+                    </div>
+                </div>
+            <!-- STOCK SCREENER & PRO DATA GRID TAB -->
+            <div id="screener" class="tab-pane active">
+                <!-- Preset Scans -->
+                <div class="card" style="margin-bottom: 20px;">
+                    <div class="card-header"><i class="fa-solid fa-wand-magic-sparkles text-mint"></i> Pre-Built Strategy Scans (ScanX + AI Edge)</div>
+                    <div class="scan-presets-grid" id="scanPresetsContainer" style="display: grid; grid-template-columns: repeat(auto-fill, minmax(220px, 1fr)); gap: 10px; padding: 15px 0;">
+                        <!-- Populated dynamically -->
+                    </div>
+                </div>
+
+                <!-- Pro Grid Card -->
+                <div class="card">
+                    <div class="card-header d-flex justify-between items-center" style="display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 10px;">
+                        <!-- Category Tabs -->
+                        <div class="grid-category-tabs" style="display: flex; gap: 6px;">
+                            <button class="grid-tab active" data-cat="ALL" style="background: #10b981; color: #000; border: none; padding: 6px 12px; border-radius: 4px; font-weight: 600; cursor: pointer;">All Nifty 500</button>
+                            <button class="grid-tab" data-cat="LARGE" style="background: rgba(255,255,255,0.05); color: #fff; border: 1px solid rgba(255,255,255,0.1); padding: 6px 12px; border-radius: 4px; font-weight: 500; cursor: pointer;">Large Cap</button>
+                            <button class="grid-tab" data-cat="MID" style="background: rgba(255,255,255,0.05); color: #fff; border: 1px solid rgba(255,255,255,0.1); padding: 6px 12px; border-radius: 4px; font-weight: 500; cursor: pointer;">Mid Cap</button>
+                            <button class="grid-tab" data-cat="SMALL" style="background: rgba(255,255,255,0.05); color: #fff; border: 1px solid rgba(255,255,255,0.1); padding: 6px 12px; border-radius: 4px; font-weight: 500; cursor: pointer;">Small Cap</button>
+                            <button class="grid-tab" data-cat="PENNY" style="background: rgba(255,255,255,0.05); color: #f59e0b; border: 1px solid rgba(245,158,11,0.3); padding: 6px 12px; border-radius: 4px; font-weight: 600; cursor: pointer;">Penny (< ₹50)</button>
+                        </div>
+
+                        <!-- Live Search & Sync Button & Export Actions -->
+                        <div style="display: flex; gap: 10px; align-items: center; flex-wrap: wrap;">
+                            <input type="text" id="gridSearchInput" placeholder="🔍 Search stock..." style="background: rgba(0,0,0,0.4); border: 1px solid rgba(255,255,255,0.15); color: #fff; padding: 6px 12px; border-radius: 4px; outline: none; font-size: 0.85rem; width: 160px;">
+                            <button class="btn btn-sm" id="exportCsvBtn" style="background: rgba(255,255,255,0.1); color: #fff; border: 1px solid rgba(255,255,255,0.2); padding: 6px 10px; border-radius: 4px; font-weight: 500; cursor: pointer;">
+                                <i class="fa-solid fa-file-csv"></i> CSV
+                            </button>
+                            <button class="btn btn-sm" id="oneClickSyncBtn" style="background: #3b82f6; color: #fff; border: none; padding: 6px 14px; border-radius: 4px; font-weight: 600; cursor: pointer;">
+                                <i class="fa-solid fa-arrows-rotate"></i> SYNC ALL DATA
+                            </button>
+                        </div>
+                    </div>
+
+                    <!-- Sortable Data Grid Table -->
+                    <div class="table-container" style="overflow-x: auto;">
+                        <table class="data-table" id="screenerTable">
+                            <thead>
+                                <tr style="cursor: pointer; user-select: none;">
+                                    <th data-sort="symbol">Symbol <i class="fa-solid fa-sort"></i></th>
+                                    <th data-sort="close">Close <i class="fa-solid fa-sort"></i></th>
+                                    <th data-sort="rsi">RSI <i class="fa-solid fa-sort"></i></th>
+                                    <th data-sort="pe">P/E <i class="fa-solid fa-sort"></i></th>
+                                    <th data-sort="roe">ROE % <i class="fa-solid fa-sort"></i></th>
+                                    <th data-sort="delivery_pct">Delivery % <i class="fa-solid fa-sort"></i></th>
+                                    <th data-sort="composite_score" style="color: #10b981;">AI Score <i class="fa-solid fa-sort-down"></i></th>
+                                    <th style="color: #10b981;">Action</th>
+                                    <th data-sort="target_price" style="color: #10b981;">Target <i class="fa-solid fa-sort"></i></th>
+                                    <th style="color: #10b981;">Stop Loss</th>
+                                    <th data-sort="rr_ratio" style="color: #10b981;">R:R <i class="fa-solid fa-sort"></i></th>
+                                    <th data-sort="net_alpha_pct" style="color: #10b981;">Net Return <i class="fa-solid fa-sort"></i></th>
+                                </tr>
+                            </thead>
+                            <tbody id="screenerTableBody">
+                                <tr><td colspan="12" style="text-align: center; color: #888; padding: 20px;">Loading indexed stock grid from SQLite...</td></tr>
+                            </tbody>
+                        </table>
+                    </div>
+                </div>
+            </div>
+
+            <!-- MARKET INSIGHTS TAB -->
+            <div id="insights" class="tab-pane">
+                <!-- 1. FII / DII Live Flow -->
+                <div class="card" style="margin-bottom: 20px;">
+                    <div class="card-header"><i class="fa-solid fa-chart-bar text-mint"></i> FII / DII Daily Flow History (NSE Official)</div>
+                    <div class="table-container">
+                        <table class="data-table" id="fiiDiiTable">
+                            <thead>
+                                <tr>
+                                    <th>Date</th>
+                                    <th>FII Buy (Cr)</th>
+                                    <th>FII Sell (Cr)</th>
+                                    <th style="color:#10b981;">FII Net (Cr)</th>
+                                    <th>DII Buy (Cr)</th>
+                                    <th>DII Sell (Cr)</th>
+                                    <th style="color:#10b981;">DII Net (Cr)</th>
+                                    <th>Combined Flow</th>
+                                </tr>
+                            </thead>
+                            <tbody id="fiiDiiTableBody">
+                                <tr><td colspan="8" style="text-align: center; color: #888; padding: 20px;">Loading live institutional FII/DII flows...</td></tr>
+                            </tbody>
+                        </table>
+                    </div>
+                </div>
+
+                <!-- 2. Cyclical Trend Heatmap -->
+                <div class="card" style="margin-bottom: 20px;">
+                    <div class="card-header"><i class="fa-solid fa-calendar-days text-mint"></i> Cyclical Trend (Nifty 50 Monthly Returns Matrix)</div>
+                    <div class="table-container" style="overflow-x: auto;">
+                        <table class="data-table" id="cyclicalTable">
+                            <thead>
+                                <tr>
+                                    <th>Fiscal Year</th>
+                                    <th>Apr</th><th>May</th><th>Jun</th><th>Jul</th><th>Aug</th><th>Sep</th>
+                                    <th>Oct</th><th>Nov</th><th>Dec</th><th>Jan</th><th>Feb</th><th>Mar</th>
+                                </tr>
+                            </thead>
+                            <tbody id="cyclicalTableBody">
+                                <tr><td colspan="13" style="text-align: center; color: #888; padding: 20px;">Loading historical cyclical matrix...</td></tr>
+                            </tbody>
+                        </table>
+                    </div>
+                </div>
+
+                <!-- 3. Top Deliveries -->
+                <div class="card" style="margin-bottom: 20px;">
+                    <div class="card-header"><i class="fa-solid fa-truck-ramp-box text-mint"></i> Top Deliveries (NSE Bhavcopy Feed)</div>
+                    <div class="table-container">
+                        <table class="data-table" id="topDeliveriesTable">
+                            <thead>
+                                <tr>
+                                    <th>Symbol</th>
+                                    <th>Close Price</th>
+                                    <th>Traded Volume</th>
+                                    <th>Delivered Volume</th>
+                                    <th>Delivery %</th>
+                                </tr>
+                            </thead>
+                            <tbody id="topDeliveriesTableBody">
+                                <tr><td colspan="5" style="text-align: center; color: #888; padding: 20px;">Loading official NSE delivery data...</td></tr>
+                            </tbody>
+                        </table>
+                    </div>
+                </div>
+
+                <!-- 4. Real-Time Corporate Filings -->
+                <div class="card">
+                    <div class="card-header"><i class="fa-solid fa-bullhorn text-mint"></i> Real-Time Corporate Announcements (NSE Feed)</div>
+                    <div class="table-container">
+                        <table class="data-table" id="filingsTable">
+                            <thead>
+                                <tr>
+                                    <th>Date</th>
+                                    <th>Symbol</th>
+                                    <th>Category</th>
+                                    <th>Announcement Subject</th>
+                                </tr>
+                            </thead>
+                            <tbody id="filingsTableBody">
+                                <tr><td colspan="4" style="text-align: center; color: #888; padding: 20px;">Loading corporate filings...</td></tr>
+                            </tbody>
+                        </table>
+                    </div>
+                </div>
+            </div>
+
+            <!-- DATA HEALTH & WATCHDOG TAB -->
+            <div id="health" class="tab-pane">
+                <div class="card">
+                    <div class="card-header"><i class="fa-solid fa-shield-halved text-mint"></i> System Health & Infrastructure Watchdog</div>
+                    <div class="health-grid" style="display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 15px; padding: 15px 0;">
+                        <div class="stat-card" style="background: rgba(255,255,255,0.03); border: 1px solid rgba(255,255,255,0.1); padding: 15px; border-radius: 8px;">
+                            <div style="font-size: 0.8rem; color: #888;">System Watchdog</div>
+                            <div style="font-size: 1.3rem; font-weight: 700; color: #10b981;" id="healthWatchdogVal">HEALTHY</div>
+                        </div>
+                        <div class="stat-card" style="background: rgba(255,255,255,0.03); border: 1px solid rgba(255,255,255,0.1); padding: 15px; border-radius: 8px;">
+                            <div style="font-size: 0.8rem; color: #888;">SQLite Database</div>
+                            <div style="font-size: 1.3rem; font-weight: 700; color: #10b981;" id="healthDbVal">WAL ENABLED</div>
+                        </div>
+                        <div class="stat-card" style="background: rgba(255,255,255,0.03); border: 1px solid rgba(255,255,255,0.1); padding: 15px; border-radius: 8px;">
+                            <div style="font-size: 0.8rem; color: #888;">Free Disk Space</div>
+                            <div style="font-size: 1.3rem; font-weight: 700; color: #3b82f6;" id="healthDiskVal">-- GB</div>
+                        </div>
+                        <div class="stat-card" style="background: rgba(255,255,255,0.03); border: 1px solid rgba(255,255,255,0.1); padding: 15px; border-radius: 8px;">
+                            <div style="font-size: 0.8rem; color: #888;">Python Runtime</div>
+                            <div style="font-size: 1.3rem; font-weight: 700; color: #fff;" id="healthPyVal">--</div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+        </main>
+    </div>
+
+    <!-- Script loading -->
+    <script src="/static/app.js"></script>
+</body>
+</html>
