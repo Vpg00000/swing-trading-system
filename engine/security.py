@@ -24,9 +24,10 @@ import time
 from pathlib import Path
 from typing import Dict, Any, Optional, Union, List, Tuple, Set
 from cryptography.fernet import Fernet
+import os
 
 DB_PATH = Path(__file__).resolve().parent.parent / "data" / "audit_log.db"
-SECRET_KEY = "SWING_TRADING_SECRET_KEY"
+SECRET_KEY = os.getenv("SWING_TRADING_SECRET_KEY", "SWING_TRADING_SECRET_KEY")
 
 
 def _derive_fernet_key(master_key: Union[str, bytes] = SECRET_KEY) -> bytes:
@@ -48,8 +49,8 @@ FERNET_KEY = _derive_fernet_key(SECRET_KEY)
 
 # Common sensitive key names (case-insensitive)
 SENSITIVE_KEYS = {
-    "secret", "secret_key", "client_secret", "api_key", "apikey", "password", 
-    "passcode", "access_token", "auth_token", "refresh_token", "token", "totp_secret", 
+    "secret", "secret_key", "client_secret", "api_key", "apikey", "password",
+    "passcode", "access_token", "auth_token", "refresh_token", "token", "totp_secret",
     "totp", "private_key", "authorization", "cookie", "jwt", "dhan_secret", "dhan_secret_key",
     "gemini_api_key", "openrouter_api_key", "deepseek_api_key", "groq_api_key", "mistral_api_key"
 }

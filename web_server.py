@@ -26,6 +26,28 @@ try:
 except ImportError:
     from src.system_health.system_health import get_system_health_data
 
+# Define sensitive keys for redaction (lowercase for case-insensitive matching)
+SENSITIVE_KEYS = {
+    "api_key", "access_token", "client_id", "client_secret",
+    "password", "auth_token", "secret", "dhan_access_token",
+    "dhan_client_id", "dhan_token", "trading_token"
+}
+
+def redact_sensitive_data(data):
+    """Recursively redacts sensitive keys in a dictionary or list of dictionaries."""
+    if isinstance(data, dict):
+        redacted_data = {}
+        for key, value in data.items():
+            if key.lower() in SENSITIVE_KEYS:
+                redacted_data[key] = "[REDACTED]"
+            else:
+                redacted_data[key] = redact_sensitive_data(value)
+        return redacted_data
+    elif isinstance(data, list):
+        return [redact_sensitive_data(item) for item in data]
+    else:
+        return data
+
 app = FastAPI(title="Swing Trading System Dashboard")
 
 # Enable CORS for local development
@@ -52,46 +74,51 @@ CACHE_TTL = 3600  # 1 hour in seconds
 REPORT_CACHE_FILE = PROJECT_ROOT / "reports" / "latest_report_cache.json"
 
 def get_cached_report_data(force_refresh: bool = False) -> dict:
-    import json
     current_time = time.time()
 
-    # 1. Try disk cache if not forcing refresh
+    # 1. Try disk cache if not forcing refresh or if in-memory cache is empty
     if not force_refresh and _cache["data"] is None:
         if REPORT_CACHE_FILE.exists():
             try:
                 data = json.loads(REPORT_CACHE_FILE.read_text(encoding="utf-8"))
-                _cache["data"] = data
+                # Redact data immediately after loading from disk
+                redacted_data = redact_sensitive_data(data)
+                _cache["data"] = redacted_data # Cache redacted version
                 _cache["timestamp"] = current_time
                 logging.info(f"Loaded instant report data from disk cache ({REPORT_CACHE_FILE.name})")
-                return data
+                return redacted_data
             except Exception as exc:
                 logging.warning(f"Disk report cache read failed: {exc}")
 
-    # 2. If cache is old or not available, refresh it
-    if force_refresh or _cache["data"] is None:
+    # 2. If cache is old, not available, or force_refresh is true, refresh it
+    if force_refresh or _cache["data"] is None or (current_time - _cache["timestamp"]) > CACHE_TTL:
         try:
-            import json
             data = generate_report_data()
-            _cache["data"] = data
+            # Redact data immediately after generation
+            redacted_data = redact_sensitive_data(data)
+            _cache["data"] = redacted_data # Cache the redacted version
             _cache["timestamp"] = current_time
             with REPORT_CACHE_FILE.open('w', encoding='utf-8') as f:
-                json.dump(data, f, ensure_ascii=False, indent=4)
+                json.dump(redacted_data, f, ensure_ascii=False, indent=4) # Write redacted version to disk
             logging.info(f"Report data refreshed and cached ({REPORT_CACHE_FILE.name})")
-            return data
+            return redacted_data
         except Exception as exc:
             logging.error(f"Failed to generate report data live: {exc}")
             if _cache["data"] is not None:
+                # If cached data exists, it should already be redacted
                 return _cache["data"]
+            # If live generation failed, try loading from disk as a fallback
             if REPORT_CACHE_FILE.exists():
                 try:
-                    import json
                     data = json.loads(REPORT_CACHE_FILE.read_text(encoding="utf-8"))
-                    _cache["data"] = data
-                    return data
+                    redacted_data = redact_sensitive_data(data)
+                    _cache["data"] = redacted_data # Cache redacted version
+                    return redacted_data
                 except Exception:
-                    pass
+                    pass # Failed to load from disk cache after live gen failure
             raise HTTPException(status_code=500, detail=str(exc))
 
+    # If none of the above, return the existing (and already redacted) cache
     return _cache["data"]
 
 @app.get("/api/report-data")
@@ -100,6 +127,7 @@ def get_cached_report_data(force_refresh: bool = False) -> dict:
 async def get_report(refresh: bool = Query(False)):
     """Endpoint to get cached report data."""
     try:
+        # get_cached_report_data already returns redacted data
         data = get_cached_report_data(force_refresh=refresh)
         return JSONResponse(content=data)
     except HTTPException as e:
@@ -112,17 +140,19 @@ async def get_dhan_market_data():
         from data.dhan.client import DhanClient
         client = DhanClient()
         market_data = client.get_market_data()
-        return JSONResponse(content=market_data)
+        # Redact market_data before sending in the response
+        return JSONResponse(content=redact_sensitive_data(market_data))
     except Exception as exc:
         logging.error(f"Failed to fetch Dhan market data: {exc}")
         raise HTTPException(status_code=500, detail=str(exc))
 
 @app.get("/api/portfolio")
 async def get_portfolio():
-    """Endpoint to fetch and store the latest Dhan portfolio state."""
+    """Endpoint to fetch, store, and reconcile the latest Dhan portfolio state."""
     try:
         portfolio_data = fetch_and_store_portfolio_state()
-        return JSONResponse(content=portfolio_data)
+        # Redact portfolio_data before sending in the response
+        return JSONResponse(content=redact_sensitive_data(portfolio_data))
     except Exception as exc:
         logging.error(f"Failed to fetch and store portfolio state: {exc}")
         raise HTTPException(status_code=500, detail=str(exc))
@@ -132,7 +162,8 @@ async def get_health():
     """Endpoint to get system health data."""
     try:
         health_data = get_system_health_data()
-        return JSONResponse(content=health_data)
+        # Redact health_data just in case it contains sensitive configuration
+        return JSONResponse(content=redact_sensitive_data(health_data))
     except HTTPException as e:
         raise e
 
@@ -295,6 +326,98 @@ async def get_flow(symbol: Optional[str] = Query(None)):
         return JSONResponse(content=data)
     except Exception as exc:
         logging.error(f"Failed to fetch flow data: {exc}")
+        raise HTTPException(status_code=500, detail=str(exc))
+
+@app.get("/api/forensics")
+@app.get("/api/forensic")
+async def get_forensics(symbol: Optional[str] = Query(None)):
+    """Endpoint to fetch forensic and governance metrics."""
+    try:
+        forensic_data = None
+        governance_data = None
+
+        try:
+            import engine.forensic as forensic_mod
+            for fn_name in ["get_forensic_score", "get_forensic_data", "analyze_forensics", "calculate_forensic_score", "get_forensics", "run_forensic_analysis"]:
+                if hasattr(forensic_mod, fn_name):
+                    fn = getattr(forensic_mod, fn_name)
+                    if callable(fn):
+                        try:
+                            forensic_data = fn(symbol=symbol) if symbol else fn()
+                        except TypeError:
+                            forensic_data = fn()
+                        if forensic_data is not None:
+                            break
+            if forensic_data is None and hasattr(forensic_mod, "ForensicAnalyzer"):
+                analyzer_cls = getattr(forensic_mod, "ForensicAnalyzer")
+                analyzer = analyzer_cls()
+                for m_name in ["analyze", "get_scores", "calculate", "run", "analyze_symbol"]:
+                    if hasattr(analyzer, m_name):
+                        m = getattr(analyzer, m_name)
+                        if callable(m):
+                            try:
+                                forensic_data = m(symbol=symbol) if symbol else m()
+                            except TypeError:
+                                forensic_data = m()
+                            if forensic_data is not None:
+                                break
+        except Exception as e:
+            logging.warning(f"Error calling forensic module: {e}")
+
+        try:
+            import engine.governance as governance_mod
+            for fn_name in ["get_governance_score", "get_governance_data", "analyze_governance", "calculate_governance_score", "get_governance", "run_governance_analysis"]:
+                if hasattr(governance_mod, fn_name):
+                    fn = getattr(governance_mod, fn_name)
+                    if callable(fn):
+                        try:
+                            governance_data = fn(symbol=symbol) if symbol else fn()
+                        except TypeError:
+                            governance_data = fn()
+                        if governance_data is not None:
+                            break
+            if governance_data is None and hasattr(governance_mod, "GovernanceAnalyzer"):
+                analyzer_cls = getattr(governance_mod, "GovernanceAnalyzer")
+                analyzer = analyzer_cls()
+                for m_name in ["analyze", "get_scores", "calculate", "run", "analyze_symbol"]:
+                    if hasattr(analyzer, m_name):
+                        m = getattr(analyzer, m_name)
+                        if callable(m):
+                            try:
+                                governance_data = m(symbol=symbol) if symbol else m()
+                            except TypeError:
+                                governance_data = m()
+                            if governance_data is not None:
+                                break
+        except Exception as e:
+            logging.warning(f"Error calling governance module: {e}")
+
+        if forensic_data is None and governance_data is None:
+            return JSONResponse(
+                status_code=200,
+                content={
+                    "status": "unavailable",
+                    "message": "Forensic and governance data is unavailable or could not be generated",
+                    "symbol": symbol,
+                    "forensics": None,
+                    "governance": None
+                }
+            )
+
+        if hasattr(forensic_data, "to_dict"):
+            forensic_data = forensic_data.to_dict()
+        if hasattr(governance_data, "to_dict"):
+            governance_data = governance_data.to_dict()
+
+        result = {
+            "symbol": symbol,
+            "forensics": forensic_data,
+            "governance": governance_data,
+            "timestamp": datetime.datetime.now(datetime.timezone.utc).isoformat()
+        }
+        return JSONResponse(content=result)
+    except Exception as exc:
+        logging.error(f"Failed to fetch forensic data: {exc}")
         raise HTTPException(status_code=500, detail=str(exc))
 
 if WEB_DIR.exists():

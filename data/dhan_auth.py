@@ -34,9 +34,9 @@ def get_dhan_credentials() -> Dict[str, Any]:
         "is_configured": is_configured,
         "client_id": client_id,
         "client_id_masked": mask_credential(client_id, show_prefix_len=4) if client_id else "NOT_SET",
-        "secret_key": secret_key,
-        "access_token": access_token,
-        "totp_secret": totp_secret,
+        "secret_key": redact_secrets(secret_key) if secret_key else "NOT_SET",
+        "access_token": redact_secrets(access_token) if access_token else "NOT_SET",
+        "totp_secret": redact_secrets(totp_secret) if totp_secret else "NOT_SET",
         "status": "READY" if is_configured else "CONFIG_MISSING"
     }
 
@@ -93,7 +93,7 @@ def renew_dhan_access_token(
     return {
         "status": "SUCCESS",
         "client_id": masked_id,
-        "access_token": raw_token,
+        "access_token": redact_secrets(raw_token),
         "access_token_redacted": mask_credential(raw_token, show_prefix_len=4),
         "generated_at": datetime.now().isoformat(),
         "expires_in_hours": 24
