@@ -6,6 +6,9 @@ Runs locally at http://localhost:8000.
 import os
 import sys
 import logging
+import datetime
+import time
+import json
 from typing import Optional, List
 from pathlib import Path
 from fastapi import FastAPI, HTTPException, Query
@@ -40,7 +43,6 @@ RESEARCH_DIR = PROJECT_ROOT / "reports" / "research"
 
 # Cache report data in-memory to prevent yfinance rate limiting / slow loads on refresh
 # We cache it with a TTL of 1 hour or manually refreshable.
-import time
 _cache = {
     "data": None,
     "timestamp": 0.0
@@ -50,13 +52,13 @@ CACHE_TTL = 3600  # 1 hour in seconds
 REPORT_CACHE_FILE = PROJECT_ROOT / "reports" / "latest_report_cache.json"
 
 def get_cached_report_data(force_refresh: bool = False) -> dict:
+    import json
     current_time = time.time()
 
     # 1. Try disk cache if not forcing refresh
     if not force_refresh and _cache["data"] is None:
         if REPORT_CACHE_FILE.exists():
             try:
-                import json
                 data = json.loads(REPORT_CACHE_FILE.read_text(encoding="utf-8"))
                 _cache["data"] = data
                 _cache["timestamp"] = current_time
@@ -77,24 +79,29 @@ def get_cached_report_data(force_refresh: bool = False) -> dict:
             logging.info(f"Report data refreshed and cached ({REPORT_CACHE_FILE.name})")
             return data
         except Exception as exc:
-            logging.error(f"Failed to generate report data: {exc}")
+            logging.error(f"Failed to generate report data live: {exc}")
+            if _cache["data"] is not None:
+                return _cache["data"]
+            if REPORT_CACHE_FILE.exists():
+                try:
+                    import json
+                    data = json.loads(REPORT_CACHE_FILE.read_text(encoding="utf-8"))
+                    _cache["data"] = data
+                    return data
+                except Exception:
+                    pass
             raise HTTPException(status_code=500, detail=str(exc))
 
     return _cache["data"]
 
-@app.get("/api/report-data")
-@app.get("/api/report")
 @app.get("/report")
-async def get_report(refresh: bool = Query(False)):
-    """Endpoint to get cached report data for dashboard."""
+async def get_report():
+    """Endpoint to get cached report data."""
     try:
-        data = get_cached_report_data(force_refresh=refresh)
+        data = get_cached_report_data()
         return JSONResponse(content=data)
     except HTTPException as e:
         raise e
-    except Exception as exc:
-        logging.error(f"Failed to load report data: {exc}")
-        raise HTTPException(status_code=500, detail=str(exc))
 
 @app.get("/api/dhan/market_data")
 async def get_dhan_market_data():
@@ -201,8 +208,15 @@ async def get_sectors():
                 detail="Sector scoring pipeline returned no data or could not be executed"
             )
 
-        if isinstance(data, dict) and "timestamp" not in data:
-            import datetime
+        if hasattr(data, "to_dict"):
+            data = data.to_dict(orient="records")
+
+        if isinstance(data, list):
+            data = {
+                "sectors": data,
+                "timestamp": datetime.datetime.now(datetime.timezone.utc).isoformat()
+            }
+        elif isinstance(data, dict) and "timestamp" not in data:
             data["timestamp"] = datetime.datetime.now(datetime.timezone.utc).isoformat()
 
         return JSONResponse(content=data)
