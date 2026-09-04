@@ -82,14 +82,19 @@ def get_cached_report_data(force_refresh: bool = False) -> dict:
 
     return _cache["data"]
 
+@app.get("/api/report-data")
+@app.get("/api/report")
 @app.get("/report")
-async def get_report():
-    """Endpoint to get cached report data."""
+async def get_report(refresh: bool = Query(False)):
+    """Endpoint to get cached report data for dashboard."""
     try:
-        data = get_cached_report_data()
+        data = get_cached_report_data(force_refresh=refresh)
         return JSONResponse(content=data)
     except HTTPException as e:
         raise e
+    except Exception as exc:
+        logging.error(f"Failed to load report data: {exc}")
+        raise HTTPException(status_code=500, detail=str(exc))
 
 @app.get("/api/dhan/market_data")
 async def get_dhan_market_data():
