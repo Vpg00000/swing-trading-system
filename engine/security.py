@@ -19,9 +19,11 @@ import sqlite3
 import time
 from pathlib import Path
 from typing import Dict, Any, Optional
+from cryptography.fernet import Fernet
 
 DB_PATH = Path(__file__).resolve().parent.parent / "data" / "audit_log.db"
-
+SECRET_KEY = "SWING_TRADING_SECRET_KEY"
+FERNET_KEY = Fernet.generate_key()
 
 def init_audit_db():
     """Initializes audit log database."""
@@ -51,24 +53,25 @@ def log_audit_event(action: str, details: str, user_ip: str = "127.0.0.1"):
         )
 
 
-def encrypt_api_secret(plain_secret: str, master_key: str = "SWING_TRADING_SECRET_KEY") -> str:
+def encrypt_api_secret(plain_secret: str, master_key: str = SECRET_KEY) -> str:
     """
     Simple symmetric AES/Base64 obfuscation for broker API credentials in config/settings.py.
     (Fixes Problems 99, 222)
     """
     if not plain_secret:
         return ""
-    key_hash = hashlib.sha256(master_key.encode()).digest()
-    encoded = base64.b64encode(plain_secret.encode()).decode()
-    return f"ENC_{encoded}"
+    fernet = Fernet(master_key)
+    encrypted = fernet.encrypt(plain_secret.encode())
+    return f"ENC_{encrypted.decode()}"
 
 
-def decrypt_api_secret(encrypted_secret: str, master_key: str = "SWING_TRADING_SECRET_KEY") -> str:
+def decrypt_api_secret(encrypted_secret: str, master_key: str = SECRET_KEY) -> str:
     """Decrypts stored obfuscated API credentials."""
     if not encrypted_secret or not encrypted_secret.startswith("ENC_"):
         return encrypted_secret
+    fernet = Fernet(master_key)
     raw = encrypted_secret.replace("ENC_", "")
-    return base64.b64decode(raw.encode()).decode()
+    return fernet.decrypt(raw.encode()).decode()
 
 
 def sanitize_error_response(exc: Exception) -> Dict[str, Any]:

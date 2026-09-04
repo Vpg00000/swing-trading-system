@@ -1,0 +1,26 @@
+{
+  "gemini": {
+    "date": "2026-09-04",
+    "requests": 18
+  },
+  "ollama": {
+    "date": "2026-09-04",
+    "requests": 39
+  },
+  "groq": {
+    "date": "2026-09-04",
+    "requests": 0
+  },
+  "deepseek": {
+    "date": "2026-09-04",
+    "requests": 0
+  },
+  "openrouter": {
+    "date": "2026-09-04",
+    "requests": 0
+  },
+  "mistral": {
+    "date": "2026-09-04",
+    "requests": 0
+  }
+}

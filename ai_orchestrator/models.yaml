@@ -1,0 +1,322 @@
+# ============================================================
+# Multi-Provider AI Control Plane — 20+ Model Catalog
+# ============================================================
+#
+# QUICK ACTIVATION GUIDE FOR CODE FIXER & RESEARCH:
+#   1. LOCAL (Ollama) is always ON and requires 0 API keys.
+#   2. Gemini is ON by default (free API key in environment).
+#   3. To activate any of the free cloud models below:
+#      - Get a free key from the provider's link.
+#      - Run: export PROVIDER_KEY=...
+#      - Set `enabled: true` in this file for that model.
+# ============================================================
+
+models:
+
+  # ==========================================================
+  # TIER 1 — LOCAL ZERO-COST / PRIVATE (Ollama)
+  # ==========================================================
+
+  - id: local-qwen-coder
+    provider: ollama
+    model: ollama/qwen2.5-coder:7b
+    role: [coder, fixer, planner, reviewer]
+    task_types: [coding, planning, reviewing, private]
+    quality: {coding: 0.85, planning: 0.65, reviewing: 0.70, private: 1.00}
+    base_quality: 0.75
+    priority: 100
+    enabled: true
+    free: true
+    local: true
+    private: true
+    daily_limit: unlimited
+    context_window: 32768
+    max_timeout_seconds: 120
+    base_url: "http://localhost:11434"
+
+  - id: local-qwen-coder-14b
+    provider: ollama
+    model: ollama/qwen2.5-coder:14b
+    role: [coder, fixer, planner, reviewer]
+    task_types: [coding, planning, reviewing, private]
+    quality: {coding: 0.92, planning: 0.75, reviewing: 0.82, private: 1.00}
+    base_quality: 0.85
+    priority: 99
+    enabled: false         # run: ollama pull qwen2.5-coder:14b then set enabled: true
+    free: true
+    local: true
+    private: true
+    daily_limit: unlimited
+    context_window: 32768
+    max_timeout_seconds: 180
+    base_url: "http://localhost:11434"
+
+  - id: local-deepseek-r1
+    provider: ollama
+    model: ollama/deepseek-r1:7b
+    role: [researcher, planner, reviewer, coder, fixer]
+    task_types: [research, planning, coding, private]
+    quality: {research: 0.88, planning: 0.82, coding: 0.80, private: 1.00}
+    base_quality: 0.82
+    priority: 97
+    enabled: true          # ← ENABLED (Ollama deepseek-r1:7b downloaded)
+    free: true
+    local: true
+    private: true
+    daily_limit: unlimited
+    context_window: 32768
+    max_timeout_seconds: 180
+    base_url: "http://localhost:11434"
+
+
+  # ==========================================================
+  # TIER 2 — GOOGLE AI STUDIO (Free Tier)
+  # ==========================================================
+  # Key: https://aistudio.google.com/apikey (FREE)
+  # Env: export GEMINI_API_KEY=...
+
+  - id: gemini-3.6-flash
+    provider: gemini
+    model: gemini/gemini-3.6-flash
+    role: [planner, reviewer, coder, fixer, escalation, researcher]
+    task_types: [planning, reviewing, coding, research, classification]
+    quality: {planning: 0.94, reviewing: 0.90, coding: 0.88, research: 0.92, classification: 0.88}
+    base_quality: 0.90
+    priority: 95
+    enabled: true
+    free: true
+    local: false
+    private: false
+    daily_limit: 1500
+    context_window: 1048576
+    max_timeout_seconds: 45
+    api_key_env: GEMINI_API_KEY
+
+  - id: gemini-2.5-flash
+    provider: gemini
+    model: gemini/gemini-2.5-flash
+    role: [planner, reviewer, coder, fixer, escalation, researcher]
+    task_types: [planning, reviewing, coding, research, classification]
+    quality: {planning: 0.90, reviewing: 0.86, coding: 0.85, research: 0.88, classification: 0.85}
+    base_quality: 0.87
+    priority: 90
+    enabled: true
+    free: true
+    local: false
+    private: false
+    daily_limit: 1500
+    context_window: 1048576
+    max_timeout_seconds: 45
+    api_key_env: GEMINI_API_KEY
+
+
+  # ==========================================================
+  # TIER 3 — GROQ (Ultra-Fast Free API — 14,400 req/day)
+  # ==========================================================
+  # Key: https://console.groq.com (FREE)
+  # Env: export GROQ_API_KEY=gsk_...
+
+  - id: groq-gpt-oss
+    provider: groq
+    model: groq/openai/gpt-oss-120b
+    role: [coder, fixer, planner, reviewer, analyst]
+    task_types: [coding, planning, reviewing, classification]
+    quality: {coding: 0.90, planning: 0.88, reviewing: 0.86, classification: 0.90}
+    base_quality: 0.88
+    priority: 92
+    enabled: true             # ← ENABLED (Groq API key active)
+    free: true
+    local: false
+    private: false
+    daily_limit: 14400
+    context_window: 131072
+    max_timeout_seconds: 30
+    api_key_env: GROQ_API_KEY
+
+  - id: groq-llama-70b
+    provider: groq
+    model: groq/llama-3.3-70b-versatile
+    role: [coder, fixer, planner, researcher, reviewer]
+    task_types: [coding, planning, research, reviewing, classification]
+    quality: {coding: 0.86, planning: 0.88, research: 0.86, reviewing: 0.85}
+    base_quality: 0.86
+    priority: 88
+    enabled: true             # ← ENABLED (Groq API key active)
+    free: true
+    local: false
+    private: false
+    daily_limit: 14400
+    context_window: 131072
+    max_timeout_seconds: 25
+    api_key_env: GROQ_API_KEY
+
+
+  # ==========================================================
+  # TIER 4 — DEEPSEEK (Reasoning & Code)
+  # ==========================================================
+  # Key: https://platform.deepseek.com (FREE credits)
+  # Env: export DEEPSEEK_API_KEY=sk-...
+
+  - id: deepseek-chat
+    provider: deepseek
+    model: deepseek/deepseek-chat
+    role: [coder, fixer, planner, reviewer]
+    task_types: [coding, planning, reviewing]
+    quality: {coding: 0.91, planning: 0.88, reviewing: 0.86}
+    base_quality: 0.88
+    priority: 89
+    enabled: true             # ← ENABLED (DeepSeek API key active)
+    free: true
+    local: false
+    private: false
+    daily_limit: 500
+    context_window: 64000
+    max_timeout_seconds: 60
+    api_key_env: DEEPSEEK_API_KEY
+
+  - id: deepseek-r1
+    provider: deepseek
+    model: deepseek/deepseek-reasoner
+    role: [researcher, planner, reviewer, coder]
+    task_types: [research, planning, reviewing, coding]
+    quality: {research: 0.94, planning: 0.90, coding: 0.87}
+    base_quality: 0.90
+    priority: 87
+    enabled: true             # ← ENABLED (DeepSeek API key active)
+    free: true
+    local: false
+    private: false
+    daily_limit: 500
+    context_window: 128000
+    max_timeout_seconds: 60
+    api_key_env: DEEPSEEK_API_KEY
+
+
+  # ==========================================================
+  # TIER 5 — OPENROUTER (Free Coding & General Pool)
+  # ==========================================================
+  # Key: https://openrouter.ai (FREE)
+  # Env: export OPENROUTER_API_KEY=sk-or-...
+
+  - id: openrouter-qwen-coder
+    provider: openrouter
+    model: openrouter/qwen/qwen-2.5-coder-32b-instruct
+    role: [coder, fixer, reviewer]
+    task_types: [coding, reviewing]
+    quality: {coding: 0.90, reviewing: 0.84}
+    base_quality: 0.85
+    priority: 86
+    enabled: true             # ← ENABLED (OpenRouter API key active)
+    free: true
+    local: false
+    private: false
+    daily_limit: 50
+    context_window: 32768
+    max_timeout_seconds: 90
+    api_key_env: OPENROUTER_API_KEY
+
+  - id: openrouter-llama-70b
+    provider: openrouter
+    model: openrouter/meta-llama/llama-3.3-70b-instruct
+    role: [coder, fixer, analyst, researcher]
+    task_types: [coding, research, classification]
+    quality: {coding: 0.84, research: 0.84, classification: 0.85}
+    base_quality: 0.82
+    priority: 75
+    enabled: true             # ← ENABLED (OpenRouter API key active)
+    free: true
+    local: false
+    private: false
+    daily_limit: 50
+    context_window: 131072
+    max_timeout_seconds: 60
+    api_key_env: OPENROUTER_API_KEY
+
+
+  # ==========================================================
+  # TIER 6 — MISTRAL / CODESTRAL (Code Specialists)
+  # ==========================================================
+  # Key: https://console.mistral.ai (FREE experiment tier)
+  # Env: export MISTRAL_API_KEY=...
+
+  - id: mistral-codestral
+    provider: mistral
+    model: mistral/codestral-latest
+    role: [coder, fixer, reviewer]
+    task_types: [coding, reviewing]
+    quality: {coding: 0.92, reviewing: 0.85}
+    base_quality: 0.88
+    priority: 91
+    enabled: true             # ← ENABLED (Mistral API key active)
+    free: true
+    local: false
+    private: false
+    daily_limit: 1000
+    context_window: 256000
+    max_timeout_seconds: 60
+    api_key_env: MISTRAL_API_KEY
+
+  - id: mistral-small
+    provider: mistral
+    model: mistral/mistral-small-latest
+    role: [analyst, reviewer, planner, coder]
+    task_types: [research, reviewing, planning, coding]
+    quality: {coding: 0.82, research: 0.82, reviewing: 0.80}
+    base_quality: 0.80
+    priority: 70
+    enabled: false            # ← set true after: export MISTRAL_API_KEY=...
+    free: true
+    local: false
+    private: false
+    daily_limit: 1000
+    context_window: 128000
+    max_timeout_seconds: 60
+    api_key_env: MISTRAL_API_KEY
+
+
+  # ==========================================================
+  # TIER 7 — CEREBRAS (Ultra High-Speed Inference)
+  # ==========================================================
+  # Key: https://cloud.cerebras.ai (FREE)
+  # Env: export CEREBRAS_API_KEY=...
+
+  - id: cerebras-llama-70b
+    provider: cerebras
+    model: cerebras/llama3.1-70b
+    role: [coder, fixer, analyst, classifier]
+    task_types: [coding, classification, triage]
+    quality: {coding: 0.84, classification: 0.86, triage: 0.84}
+    base_quality: 0.82
+    priority: 80
+    enabled: false            # ← set true after: export CEREBRAS_API_KEY=...
+    free: true
+    local: false
+    private: false
+    daily_limit: 1000
+    context_window: 131072
+    max_timeout_seconds: 15
+    api_key_env: CEREBRAS_API_KEY
+
+
+  # ==========================================================
+  # TIER 8 — CLOUDFLARE WORKERS AI (Backup Pool)
+  # ==========================================================
+  # Key: https://dash.cloudflare.com (FREE — 10,000 neurons/day)
+  # Env: export CLOUDFLARE_API_KEY=...
+
+  - id: cloudflare-glm
+    provider: cloudflare
+    model: cloudflare/@cf/zai/glm-4.7-flash
+    role: [coder, fixer, classifier, triage]
+    task_types: [coding, classification, triage]
+    quality: {coding: 0.78, classification: 0.78, triage: 0.76}
+    base_quality: 0.76
+    priority: 65
+    enabled: false            # ← set true after: export CLOUDFLARE_API_KEY=...
+    free: true
+    local: false
+    private: false
+    daily_limit: 10000
+    context_window: 32768
+    max_timeout_seconds: 60
+    api_key_env: CLOUDFLARE_API_KEY

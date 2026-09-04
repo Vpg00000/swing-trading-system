@@ -26,6 +26,7 @@ logs/
 
 # Local/generated data
 data/
+!data/dhan/
 scratch/
 reports/
 
