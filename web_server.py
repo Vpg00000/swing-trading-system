@@ -17,6 +17,11 @@ from fastapi.middleware.cors import CORSMiddleware
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
 from engine.report import generate_report_data, build_report
+from engine.portfolio_manager import fetch_and_store_portfolio_state
+try:
+    from src.system_health import get_system_health_data
+except ImportError:
+    from src.system_health.system_health import get_system_health_data
 
 app = FastAPI(title="Swing Trading System Dashboard")
 
@@ -42,12 +47,11 @@ _cache = {
 }
 CACHE_TTL = 3600  # 1 hour in seconds
 
-
 REPORT_CACHE_FILE = PROJECT_ROOT / "reports" / "latest_report_cache.json"
 
 def get_cached_report_data(force_refresh: bool = False) -> dict:
     current_time = time.time()
-    
+
     # 1. Try disk cache if not forcing refresh
     if not force_refresh and _cache["data"] is None:
         if REPORT_CACHE_FILE.exists():
@@ -64,6 +68,7 @@ def get_cached_report_data(force_refresh: bool = False) -> dict:
     # 2. If cache is old or not available, refresh it
     if force_refresh or _cache["data"] is None:
         try:
+            import json
             data = generate_report_data()
             _cache["data"] = data
             _cache["timestamp"] = current_time
@@ -84,7 +89,7 @@ async def get_report():
         data = get_cached_report_data()
         return JSONResponse(content=data)
     except HTTPException as e:
-        return e
+        raise e
 
 @app.get("/api/dhan/market_data")
 async def get_dhan_market_data():
@@ -97,3 +102,117 @@ async def get_dhan_market_data():
     except Exception as exc:
         logging.error(f"Failed to fetch Dhan market data: {exc}")
         raise HTTPException(status_code=500, detail=str(exc))
+
+@app.get("/api/portfolio")
+async def get_portfolio():
+    """Endpoint to fetch and store the latest Dhan portfolio state."""
+    try:
+        portfolio_data = fetch_and_store_portfolio_state()
+        return JSONResponse(content=portfolio_data)
+    except Exception as exc:
+        logging.error(f"Failed to fetch and store portfolio state: {exc}")
+        raise HTTPException(status_code=500, detail=str(exc))
+
+@app.get("/api/health")
+async def get_health():
+    """Endpoint to get system health data."""
+    try:
+        health_data = get_system_health_data()
+        return JSONResponse(content=health_data)
+    except HTTPException as e:
+        raise e
+
+@app.get("/api/microstructure")
+async def get_microstructure(
+    symbol: Optional[str] = Query(None),
+    depth: int = Query(10)
+):
+    """Endpoint to fetch market microstructure metrics including OBI."""
+    try:
+        import data.microstructure as ms
+        data = None
+        if hasattr(ms, "get_microstructure_data"):
+            data = ms.get_microstructure_data(symbol=symbol, depth=depth)
+        elif hasattr(ms, "get_microstructure_metrics"):
+            data = ms.get_microstructure_metrics(symbol=symbol, depth=depth)
+        elif hasattr(ms, "calculate_obi"):
+            import inspect
+            sig = inspect.signature(ms.calculate_obi)
+            if "symbol" in sig.parameters:
+                data = ms.calculate_obi(symbol=symbol, depth=depth)
+            else:
+                obi_val = ms.calculate_obi([], [], depth=depth)
+                data = {"symbol": symbol, "depth": depth, "obi": obi_val}
+        else:
+            data = {"symbol": symbol, "depth": depth, "obi": 0.0}
+
+        if not isinstance(data, dict):
+            data = {"symbol": symbol, "depth": depth, "obi": float(data) if data is not None else 0.0}
+
+        return JSONResponse(content=data)
+    except Exception as exc:
+        logging.error(f"Failed to fetch microstructure metrics: {exc}")
+        raise HTTPException(status_code=500, detail=str(exc))
+
+@app.get("/api/sectors")
+async def get_sectors():
+    """Endpoint to fetch sector scoring and rotation pipeline results."""
+    try:
+        import engine.sector_score as sector_score_mod
+
+        data = None
+        for fn_name in [
+            "get_sector_scores",
+            "calculate_sector_scores",
+            "compute_sector_scores",
+            "get_sector_ranks",
+            "get_sector_rotation",
+            "run_sector_pipeline",
+        ]:
+            if hasattr(sector_score_mod, fn_name):
+                fn = getattr(sector_score_mod, fn_name)
+                if callable(fn):
+                    data = fn()
+                    if data is not None:
+                        break
+
+        if data is None and hasattr(sector_score_mod, "SectorScorer"):
+            scorer_cls = getattr(sector_score_mod, "SectorScorer")
+            scorer = scorer_cls()
+            for method_name in ["get_scores", "calculate", "run", "calculate_scores", "get_sector_scores"]:
+                if hasattr(scorer, method_name):
+                    method = getattr(scorer, method_name)
+                    if callable(method):
+                        data = method()
+                        if data is not None:
+                            break
+
+        if data is None and hasattr(sector_score_mod, "main"):
+            data = sector_score_mod.main()
+
+        if data is None:
+            raise HTTPException(
+                status_code=500,
+                detail="Sector scoring pipeline returned no data or could not be executed"
+            )
+
+        if isinstance(data, dict) and "timestamp" not in data:
+            import datetime
+            data["timestamp"] = datetime.datetime.now(datetime.timezone.utc).isoformat()
+
+        return JSONResponse(content=data)
+    except HTTPException:
+        raise
+    except Exception as exc:
+        logging.error(f"Failed to fetch sector scores: {exc}")
+        raise HTTPException(status_code=500, detail=str(exc))
+
+if WEB_DIR.exists():
+    app.mount("/static", StaticFiles(directory=str(WEB_DIR)), name="static")
+
+    @app.get("/")
+    async def serve_index():
+        index_file = WEB_DIR / "index.html"
+        if index_file.exists():
+            return FileResponse(index_file)
+        return PlainTextResponse("Swing Trading System Dashboard UI")
