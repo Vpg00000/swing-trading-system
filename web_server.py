@@ -94,11 +94,13 @@ def get_cached_report_data(force_refresh: bool = False) -> dict:
 
     return _cache["data"]
 
+@app.get("/api/report-data")
+@app.get("/api/report")
 @app.get("/report")
-async def get_report():
+async def get_report(refresh: bool = Query(False)):
     """Endpoint to get cached report data."""
     try:
-        data = get_cached_report_data()
+        data = get_cached_report_data(force_refresh=refresh)
         return JSONResponse(content=data)
     except HTTPException as e:
         raise e
@@ -224,6 +226,75 @@ async def get_sectors():
         raise
     except Exception as exc:
         logging.error(f"Failed to fetch sector scores: {exc}")
+        raise HTTPException(status_code=500, detail=str(exc))
+
+@app.get("/api/flow")
+async def get_flow(symbol: Optional[str] = Query(None)):
+    """Endpoint to fetch verified institutional and money flow metrics."""
+    try:
+        data = None
+
+        try:
+            import data.institutional_flow as inst_flow
+            for fn_name in ["get_institutional_flow", "get_flow_data", "get_institutional_summary", "fetch_institutional_flow"]:
+                if hasattr(inst_flow, fn_name):
+                    fn = getattr(inst_flow, fn_name)
+                    if callable(fn):
+                        try:
+                            data = fn(symbol=symbol) if symbol else fn()
+                        except TypeError:
+                            data = fn()
+                        if data is not None:
+                            break
+        except Exception as e:
+            logging.warning(f"Error calling institutional_flow module: {e}")
+
+        if data is None:
+            try:
+                import engine.money_flow as mf
+                for fn_name in ["get_money_flow", "get_flow_summary", "get_flow_data", "calculate_money_flow"]:
+                    if hasattr(mf, fn_name):
+                        fn = getattr(mf, fn_name)
+                        if callable(fn):
+                            try:
+                                data = fn(symbol=symbol) if symbol else fn()
+                            except TypeError:
+                                data = fn()
+                            if data is not None:
+                                break
+            except Exception as e:
+                logging.warning(f"Error calling money_flow module: {e}")
+
+        if data is None:
+            try:
+                import data.fii_dii as fii_dii
+                for fn_name in ["get_fii_dii_data", "get_latest_fii_dii", "get_fii_dii_summary", "fetch_fii_dii"]:
+                    if hasattr(fii_dii, fn_name):
+                        fn = getattr(fii_dii, fn_name)
+                        if callable(fn):
+                            data = fn()
+                            if data is not None:
+                                break
+            except Exception as e:
+                logging.warning(f"Error calling fii_dii module: {e}")
+
+        if data is None:
+            return JSONResponse(
+                status_code=200,
+                content={
+                    "status": "unavailable",
+                    "message": "Institutional flow data is unavailable or stale",
+                    "symbol": symbol,
+                    "data": None
+                }
+            )
+
+        if hasattr(data, "to_dict"):
+            data = data.to_dict(orient="records")
+
+        return JSONResponse(content=data)
+    except Exception as exc:
+        logging.error(f"Failed to fetch flow data: {exc}")
         raise HTTPException(status_code=500, detail=str(exc))
 
 if WEB_DIR.exists():
