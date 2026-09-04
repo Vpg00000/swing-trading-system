@@ -1,3 +1,5 @@
+from datetime import datetime
+
 class SystemHealth:
     def __init__(self):
         self.status = 'UNKNOWN'
