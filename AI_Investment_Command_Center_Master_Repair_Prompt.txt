@@ -1,0 +1,298 @@
+MASTER REPAIR + VERIFICATION PROMPT
+
+You are taking over an existing Swing Trading System + AI Investment Command Center. Previous documentation claims that many problems are “fixed”, but those claims are UNVERIFIED. Treat every previous fixed/implemented/complete/ready claim as unverified until you inspect the actual repository, reproduce the behavior, implement or repair it, test it, and provide evidence.
+
+PRIMARY OBJECTIVE
+Build the actual working system according to the existing backend architecture and UI flow. Do not merely update documentation or mark tasks fixed.
+
+CORE LOOP
+MARKET DATA
+→ DATA INGESTION
+→ DATA VALIDATION
+→ NORMALIZATION
+→ MARKET REGIME
+→ SECTOR ROTATION
+→ MONEY FLOW
+→ TECHNICAL ANALYSIS
+→ FUNDAMENTAL ANALYSIS
+→ GOVERNANCE/FORENSICS
+→ EVENT/CATALYST DETECTION
+→ AI RESEARCH
+→ PRICED-IN ANALYSIS
+→ OPPORTUNITY ENGINES
+→ COMPOSITE SCORE
+→ EXPECTED RETURN
+→ COST + TAX
+→ NET ALPHA
+→ PORTFOLIO RISK
+→ POSITION SIZING
+→ MODEL TARGET
+→ ACTUAL DHAN PORTFOLIO
+→ PORTFOLIO DRIFT
+→ TOP 3 ACTIONS
+→ HUMAN APPROVAL
+→ ORDER PREPARATION
+→ DHAN EXECUTION
+→ EXECUTION VERIFICATION
+→ RECONCILIATION
+→ P&L ATTRIBUTION
+→ TRADE JOURNAL
+→ BACKTEST
+→ LEARNING
+→ OBSERVE AGAIN
+
+HARD RULES
+1. Never trust an existing “fixed” status without evidence.
+2. Backend is the source of truth.
+3. UI must never invent production values.
+4. No fake/demo placeholders in production.
+5. Python/backend owns mathematical calculations.
+6. AI is the research/judgment layer, not the numerical authority.
+7. Human approval is mandatory before live execution.
+8. Never bypass risk controls.
+9. Never expose secrets.
+10. If external data is unavailable, mark it unavailable/stale; never fabricate it.
+11. Do not mark a task VERIFIED unless implementation + execution + test + evidence exist.
+12. If blocked, record the exact blocker and next action.
+
+VERIFICATION STATUS VALUES
+NOT IMPLEMENTED
+BROKEN
+PARTIALLY IMPLEMENTED
+IMPLEMENTED BUT UNTESTED
+VERIFIED
+BLOCKED
+
+For every task maintain:
+Task ID, Domain, Component, Requirement, Expected Behavior, Current Status, Priority, Dependencies, Backend Module, UI Module, API Endpoint, Database Table, Data Source, Implementation Plan, Test Plan, Test Command, Evidence, Last Verified, Owner/Agent, Blocker, Next Action, Acceptance Criteria, Regression Risk, Notes.
+
+TARGET ARCHITECTURE
+swing-trading-system/
+├── data/
+│   ├── database.py
+│   ├── sync_engine.py
+│   ├── microstructure.py
+│   ├── institutional_flow.py
+│   ├── corporate_calendar.py
+│   ├── dhan_auth.py
+│   ├── fii_dii.py
+│   └── nse_filings.py
+├── engine/
+│   ├── indicators.py
+│   ├── portfolio_optimizer.py
+│   ├── tax_lots.py
+│   ├── forensic.py
+│   ├── macro_regime.py
+│   ├── macro_shocks.py
+│   ├── dhan_routing.py
+│   ├── backtest.py
+│   ├── security.py
+│   ├── resiliency.py
+│   ├── tax_indexation.py
+│   ├── candlesticks_advanced.py
+│   ├── trade_journal.py
+│   └── ai_engine.py
+├── web_server.py
+└── web/
+    ├── index.html
+    ├── style.css
+    └── app.js
+
+AUDIT AND REPAIR ALL OF THESE AREAS
+
+1. DATA INGESTION
+Verify DHAN, NSE, BSE, SEBI, FII, DII, MF, insider, bulk/block, promoter/pledge, fundamentals, news, macro and market data.
+Track connection, freshness, last successful update, last failure, record count and error.
+Do not show OK just because configuration exists.
+
+2. LIVE MARKET DATA
+Verify LTP, OHLC, volume, delivery, VWAP, bid/ask, spread, market depth, order-book imbalance, circuit limits, ATR, RSI, moving averages and relative strength.
+Missing external fields must be explicitly unavailable.
+
+3. MARKET REGIME
+Calculate NIFTY trend, NIFTY vs 200DMA, Bank Nifty, India VIX, breadth, FII/DII, volatility regime, trend regime, risk-on/risk-off and global macro.
+Return regime, score, confidence and evidence.
+
+4. SECTOR ROTATION
+Calculate sector momentum, relative strength, volume, breadth, institutional flow where available, earnings trend, catalyst, valuation and composite score.
+Identify money moving toward/away.
+
+5. MONEY FLOW
+Verify FII, DII, MF, insider, promoter, bulk/block, delivery, volume and ownership changes.
+Classify accumulation, distribution, mixed, neutral or unknown.
+
+6. TECHNICALS
+Verify 20/50/100/200 DMA, RSI, ATR, ADX, Supertrend, VWAP, volume ratio, delivery %, relative strength, momentum, breakout, breakdown, support and resistance.
+
+7. FUNDAMENTALS
+Verify revenue, EPS, EBITDA, margins, ROE, ROCE, debt, interest coverage, CFO, FCF, FCF conversion, earnings quality, P/E, P/B, EV/EBITDA, PEG, FCF yield and historical/sector valuation.
+
+8. FORENSICS/GOVERNANCE
+Verify Beneish M-Score, Altman Z-Score, auditor quality, promoter pledge, related parties, accounting concerns, litigation, SEBI/regulatory actions, credit rating and cash-flow quality.
+
+9. EVENT DETECTION
+Detect price/volume/delivery spikes, gaps, breakouts, block/bulk deals, insider/promoter activity, corporate announcements, earnings, guidance, ratings, regulatory events, M&A, capex, fundraising, management changes, sector events and macro shocks.
+
+10. AI RESEARCH
+AI must receive structured evidence and answer what happened, why now, source credibility, novelty, beneficiaries, losers, fundamental significance, earnings impact, sector impact, priced-in state, bull case, bear case and unknowns.
+Return structured output.
+
+11. PRICED-IN ENGINE
+Compare expected impact against actual price move, volume, historical comparable events, valuation and expectations.
+Classify UNDER PRICED, PARTIALLY PRICED, FULLY PRICED, OVERPRICED or UNKNOWN.
+
+12. OPPORTUNITY ENGINES
+Verify momentum, catalyst, insider, institutional, breakout, mean-reversion, deep-value and special-situation engines.
+
+13. COMPOSITE SCORE
+Use the intended 100-point structure:
+Market Regime 10
+Sector 10
+Catalyst 15
+FII/DII/MF 15
+Insider 10
+Technical 15
+Fundamental 10
+Cash Flow 5
+Governance 5
+Valuation 5
+Make every score traceable.
+
+14. EXPECTED RETURN
+Calculate entry, target, stop, upside, expected loss, probability, expected value and risk/reward using backend/Python.
+
+15. COST ENGINE
+Calculate brokerage, STT, exchange charges, GST, stamp duty, slippage and applicable charges.
+
+16. TAX
+Verify STCG/LTCG/business-income handling as applicable, FIFO tax lots, realized/unrealized P&L and tax estimate. Do not claim tax correctness without verification.
+
+17. NET ALPHA
+Gross return → costs/slippage → taxes → net return → risk adjustment → benchmark comparison → net alpha.
+
+18. PORTFOLIO RISK
+Verify maximum equity, stock/sector/sub-industry limits, correlation, beta, CVaR, drawdown, liquidity, volatility, ATR, stop distance and cash reserve.
+
+19. POSITION SIZING
+Use capital, risk/trade, stop distance, ATR, volatility, liquidity, correlation, CVaR and exposure to produce quantity, investment, maximum loss and weight.
+
+20. DHAN PORTFOLIO
+Pull actual holdings, positions, orders, trades and cash/funds. Compare MODEL TARGET vs ACTUAL DHAN and calculate drift/capacity.
+
+21. HUMAN APPROVAL
+TOP 3 → REVIEW → APPROVE/REVIEW/REJECT.
+Reject means no trade. Review means more research. Approve means order preparation.
+
+22. DHAN EXECUTION
+Approval → pre-trade checks → cash/position/risk checks → order payload → Dhan → execution → actual price → confirmation → trade record.
+Do not bypass approval.
+
+23. RECONCILIATION
+Compare requested vs executed quantity/price, slippage, charges, actual holding and actual P&L. Update portfolio/risk/capital/journal.
+
+24. TRADE JOURNAL
+Record trade ID, timestamp, symbol, strategy, reason, catalyst, technical/fundamental thesis, AI research, entry/stop/target, expected return/loss, size, execution, slippage, exit, P&L and expected vs actual.
+
+25. BACKTEST
+Prevent lookahead bias, survivorship bias, future leakage and execution cheating. Verify win rate, profit factor, expectancy, Sharpe, Sortino, Calmar, max drawdown, CAGR, volatility, CVaR, turnover and transaction costs. Include paper trading.
+
+26. LEARNING
+Compare model expectation vs actual. Identify false positives/negatives and weak signal types. Do not automatically change production parameters on insufficient evidence.
+
+UI REQUIREMENTS
+Navigation:
+Dashboard
+Markets
+Opportunities
+AI Research
+Global Macro
+Sector Rotation
+Money Flow
+Technicals
+Fundamentals
+Governance/Forensics
+Portfolio
+Risk
+Net Returns
+Benchmark/PMS
+Orders
+Trade Journal
+Backtest
+System Health
+
+Dashboard must show real backend data:
+Portfolio value, invested, cash, daily/total P&L, regime, regime score, NIFTY, Bank Nifty, VIX, breadth, today's events and source health.
+
+Opportunity monitor:
+Stock, price, move, volume, catalyst, score, confidence, priced-in, expected return, risk/reward and action.
+
+Stock research:
+Price/chart, volume, technical, fundamental, valuation, governance, money flow, institutional activity, catalyst, news, AI research, historical comparables, priced-in analysis, expected return, risk, position size and decision.
+
+Portfolio:
+Model target, actual Dhan, drift, available capacity, current/max risk and suggested allocation.
+
+Risk:
+Portfolio beta, CVaR, drawdown, concentration, correlation, liquidity, volatility, cash reserve and exposure.
+
+System health:
+Component, status, last update, latency, records, error and retry.
+
+UI/BACKEND RULE
+Every UI value must trace:
+UI → API → backend module → database/table → source data.
+Remove accidental hardcoded production values and placeholders.
+
+SEARCH THE REPOSITORY
+Search for:
+XXX
+XX%
+₹XXX
+sample
+dummy
+mock
+fake
+TODO
+FIXME
+placeholder
+hardcoded
+and determine whether each occurrence is legitimate test/demo data or accidental production behavior.
+
+TESTING
+Create/execute unit, integration, API, database, data-validation, risk, backtest, paper-trading, UI, E2E, failure, security and performance tests.
+Create one deterministic end-to-end scenario:
+data → opportunity → research → score → priced-in → return → risk → sizing → top 3 → approval simulation → paper order → reconciliation → P&L → journal.
+
+PERFORMANCE
+Measure actual cold load, warm load, 500-stock query, filtered query, sorting, search, detail page, dashboard, API latency and database latency. Do not claim performance targets without measurements.
+
+SECURITY
+Verify secrets, Dhan tokens, API keys, authentication, input validation, SQL injection, audit logs, rate limiting, CORS/CSRF where applicable and error sanitization.
+
+FAILURE HANDLING
+Implement NORMAL, DEGRADED, SAFE MODE and TRADING BLOCKED.
+Critical data failure must prevent trading. Never fabricate missing data.
+
+FINAL REPORT
+Return:
+1. Total tasks found
+2. Verified
+3. Broken
+4. Partially implemented
+5. Implemented but untested
+6. Blocked
+7. Remaining
+8. Files changed
+9. Tests run
+10. Test results
+11. Evidence
+12. Remaining blockers
+13. Next recommended tasks
+14. Backend-to-UI mapping
+15. Final architecture
+
+IMPORTANT
+Do not optimize for saying “complete”.
+Optimize for real implementation, real data, real tests, real UI, real integration and evidence.
+
+The CSV task tracker supplied with this prompt is the persistent work queue. Update it after every meaningful change. Never delete historical tasks. Change status only with evidence. Add new discovered tasks with new IDs. Always pick the highest-priority unblocked task next.
