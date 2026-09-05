@@ -4,6 +4,7 @@ import os
 import re
 import sys
 import subprocess
+import time
 from dataclasses import dataclass, asdict
 from datetime import datetime, timezone
 from pathlib import Path
@@ -71,14 +72,12 @@ SUSPICIOUS_PATTERNS = [
     ("fake_response", re.compile(r'\breturn\s*\{\s*["\']status["\']\s*:\s*["\'](?:STUB|FAKE|DUMMY|MOCK|PLACEHOLDER)["\']|\breturn\s*\{\s*["\']stub["\']|\breturn\s*\{\s*["\']fake["\']|\breturn\s*\{\s*["\']mock["\']', re.IGNORECASE)),
 ]
 
-
 @dataclass
 class AuditResult:
     command: str
     return_code: int
     stdout: str
     stderr: str
-
 
 @dataclass
 class PlaceholderFinding:
@@ -91,7 +90,6 @@ class PlaceholderFinding:
 
     def to_dict(self) -> Dict[str, Any]:
         return asdict(self)
-
 
 class RepositoryAuditor:
     """

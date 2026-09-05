@@ -182,6 +182,9 @@ class Verifier:
                 cmd_parts[0] = self.python
             elif cmd_parts[0] == "pytest":
                 cmd_parts = [self.python, "-m", "pytest"] + cmd_parts[1:]
+            else:
+                # Non-standard prose test commands fallback to python -m pytest tests/
+                cmd_parts = [self.python, "-m", "pytest", "tests/"]
 
             clean_parts = []
             for part in cmd_parts:

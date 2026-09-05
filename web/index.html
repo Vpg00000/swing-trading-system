@@ -3,8 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Swing Trading System - Command Center</title>
-    <!-- Use static path mapped to /static/... -->
+    <title>Swing Trading System - AI Command Center</title>
     <link rel="stylesheet" href="/static/style.css">
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.0/css/all.min.css">
     <link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@300;400;500;600;700&family=Space+Grotesk:wght@300;400;500;600;700&display=swap" rel="stylesheet">
@@ -21,7 +20,7 @@
             <span>NIFTY <span class="text-mint font-bold" id="niftyVal">--</span></span>
             <span>VIX <span class="text-amber font-bold" id="vixVal">--</span></span>
         </div>
-        <button class="refresh-btn" id="refreshBtn" title="Re-run API calculations (takes ~5-10s)">
+        <button class="refresh-btn" id="refreshBtn" title="Re-run backend calculations">
             <i class="fa-solid fa-arrows-rotate"></i> RE-RUN PIPELINE
         </button>
     </header>
@@ -31,20 +30,23 @@
 
         <!-- Left Sidebar Navigation -->
         <nav class="sidebar">
-            <button class="nav-btn" data-tab="overview">
+            <button class="nav-btn active" data-tab="overview">
                 <i class="fa-solid fa-gauge-high"></i> Overview
             </button>
-            <button class="nav-btn active" data-tab="screener">
+            <button class="nav-btn" data-tab="screener">
                 <i class="fa-solid fa-filter"></i> Stock Screener Grid
+            </button>
+            <button class="nav-btn" data-tab="candidates">
+                <i class="fa-solid fa-bullseye"></i> Opportunities Monitor
+            </button>
+            <button class="nav-btn" data-tab="research">
+                <i class="fa-solid fa-microscope"></i> AI Research Terminal
+            </button>
+            <button class="nav-btn" data-tab="allocation">
+                <i class="fa-solid fa-chart-pie"></i> Portfolio & Risk UI
             </button>
             <button class="nav-btn" data-tab="insights">
                 <i class="fa-solid fa-chart-line"></i> Market Insights
-            </button>
-            <button class="nav-btn" data-tab="allocation">
-                <i class="fa-solid fa-chart-pie"></i> Allocation & Drift
-            </button>
-            <button class="nav-btn" data-tab="candidates">
-                <i class="fa-solid fa-bullseye"></i> Candidates & Actions
             </button>
             <button class="nav-btn" data-tab="prompts">
                 <i class="fa-solid fa-terminal"></i> Claude Prompts
@@ -53,15 +55,15 @@
                 <i class="fa-solid fa-file-invoice"></i> Text Report
             </button>
             <button class="nav-btn" data-tab="health">
-                <i class="fa-solid fa-shield-halved"></i> Data Health
+                <i class="fa-solid fa-shield-halved"></i> System Health
             </button>
         </nav>
 
         <!-- Main Content Area -->
         <main class="content-view">
 
-            <!-- OVERVIEW TAB -->
-            <div id="overview" class="tab-pane">
+            <!-- 1. OVERVIEW TAB -->
+            <div id="overview" class="tab-pane active">
                 <div class="overview-grid">
 
                     <!-- Regime Gauge Card -->
@@ -75,10 +77,10 @@
                             <div class="gauge-val" id="regimeScoreVal">--</div>
                             <div class="gauge-label" id="regimeStateVal">UNKNOWN</div>
                         </div>
-                        <div class="regime-notes" id="regimeNotes">Evaluating...</div>
+                        <div class="regime-notes" id="regimeNotes">Evaluating market regime...</div>
                     </div>
 
-                    <!-- Macro Summary Card -->
+                    <!-- Capital Summary Card -->
                     <div class="card">
                         <div class="card-header">Capital Summary</div>
                         <div class="capital-stats">
@@ -112,150 +114,31 @@
                 </div>
             </div>
 
-            <!-- ALLOCATION TAB -->
-            <div id="allocation" class="tab-pane">
-                <div class="card">
-                    <div class="card-header">Sleeve Allocation & Drift</div>
-                    <div class="table-container">
-                        <table class="data-table" id="driftTable">
-                            <thead>
-                                <tr>
-                                    <th>Sleeve</th>
-                                    <th>Target %</th>
-                                    <th>Target Value</th>
-                                    <th>Actual %</th>
-                                    <th>Actual Value</th>
-                                    <th>Drift %</th>
-                                    <th>Drift Value</th>
-                                </tr>
-                            </thead>
-                            <tbody>
-                                <!-- Populated dynamically -->
-                            </tbody>
-                        </table>
-                    </div>
-                </div>
-
-                <div class="card margin-top">
-                    <div class="card-header">Current Holdings Detailed Reconciliation</div>
-                    <div class="table-container">
-                        <table class="data-table" id="holdingsTable">
-                            <thead>
-                                <tr>
-                                    <th>Symbol</th>
-                                    <th>Sleeve</th>
-                                    <th>Status</th>
-                                    <th>Current Value</th>
-                                    <th>Drift</th>
-                                    <th>Tax Class</th>
-                                    <th>Days Held</th>
-                                    <th>Gain/Loss %</th>
-                                    <th>Est. Tax</th>
-                                </tr>
-                            </thead>
-                            <tbody>
-                                <!-- Populated dynamically -->
-                            </tbody>
-                        </table>
-                    </div>
-                </div>
-
-                <div id="taxHarvestingContainer" class="card margin-top hidden">
-                    <div class="card-header text-amber"><i class="fa-solid fa-scale-balanced"></i> Tax & Loss Harvesting Alerts</div>
-                    <div class="alerts-list" id="taxAlerts">
-                        <!-- Populated dynamically -->
-                    </div>
-                </div>
-            </div>
-
-            <!-- CANDIDATES TAB -->
-            <div id="candidates" class="tab-pane">
-                <div class="candidates-toolbar">
-                    <h2>Top Momentum Candidates & Recommendations</h2>
-                    <div class="actions-summary" id="actionsSummary">
-                        <!-- Summary list of today's recommended trades -->
-                    </div>
-                </div>
-                <div class="candidates-list" id="candidatesList">
-                    <!-- Populated dynamically -->
-                </div>
-            </div>
-
-            <!-- PROMPTS TAB -->
-            <div id="prompts" class="tab-pane">
-                <div class="prompts-layout">
-                    <!-- Prompts sidebar -->
-                    <div class="prompts-list-panel">
-                        <h2>Saved Claude Research Files</h2>
-                        <div class="prompt-buttons" id="promptsList">
-                            <!-- List of prompt file names -->
-                        </div>
-                    </div>
-                    <!-- Prompt content -->
-                    <div class="prompt-content-panel">
-                        <div class="prompt-header" id="promptHeader">
-                            <span class="prompt-title font-mono" id="activePromptTitle">Select a prompt file</span>
-                            <button class="copy-btn hidden" id="copyPromptBtn">
-                                <i class="fa-solid fa-copy"></i> COPY PROMPT
-                            </button>
-                        </div>
-                        <pre class="prompt-body font-mono" id="activePromptBody">Select a file from the list to preview its contents. Copy and paste it directly into Claude to run the qualitative research pass.</pre>
-                    </div>
-                </div>
-            </div>
-
-            <!-- RAW REPORT TAB -->
-            <div id="raw" class="tab-pane">
-                <div class="raw-report-header">
-                    <h2>Formatted Daily Command Center Text Report</h2>
-                    <button class="copy-btn" id="copyReportBtn"><i class="fa-solid fa-copy"></i> COPY REPORT</button>
-                </div>
-                <pre class="raw-report-body font-mono" id="rawReportText">Loading daily report...</pre>
-            </div>
-
-            <!-- HEALTH TAB -->
-            <div id="health" class="tab-pane">
-                <div class="card">
-                    <div class="card-header">Data Pipeline API Health Check</div>
-                    <div class="table-container">
-                        <table class="data-table" id="healthTable">
-                            <thead>
-                                <tr>
-                                    <th>Pipeline Segment</th>
-                                    <th>Status</th>
-                                </tr>
-                            </thead>
-                            <tbody>
-                                <!-- Populated dynamically -->
-                            </tbody>
-                        </table>
-                    </div>
-                </div>
-            <!-- STOCK SCREENER & PRO DATA GRID TAB -->
-            <div id="screener" class="tab-pane active">
+            <!-- 2. STOCK SCREENER & PRO DATA GRID TAB -->
+            <div id="screener" class="tab-pane">
                 <!-- Preset Scans -->
                 <div class="card" style="margin-bottom: 20px;">
-                    <div class="card-header"><i class="fa-solid fa-wand-magic-sparkles text-mint"></i> Pre-Built Strategy Scans (ScanX + AI Edge)</div>
-                    <div class="scan-presets-grid" id="scanPresetsContainer" style="display: grid; grid-template-columns: repeat(auto-fill, minmax(220px, 1fr)); gap: 10px; padding: 15px 0;">
+                    <div class="card-header"><i class="fa-solid fa-wand-magic-sparkles text-mint"></i> Strategy Scans (ScanX + AI Edge)</div>
+                    <div class="scan-presets-grid" id="scanPresetsContainer" style="display: grid; grid-template-columns: repeat(auto-fill, minmax(220px, 1fr)); gap: 10px; padding: 10px 0;">
                         <!-- Populated dynamically -->
                     </div>
                 </div>
 
                 <!-- Pro Grid Card -->
                 <div class="card">
-                    <div class="card-header d-flex justify-between items-center" style="display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 10px;">
+                    <div class="card-header" style="display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 10px;">
                         <!-- Category Tabs -->
                         <div class="grid-category-tabs" style="display: flex; gap: 6px;">
                             <button class="grid-tab active" data-cat="ALL" style="background: #10b981; color: #000; border: none; padding: 6px 12px; border-radius: 4px; font-weight: 600; cursor: pointer;">All Nifty 500</button>
                             <button class="grid-tab" data-cat="LARGE" style="background: rgba(255,255,255,0.05); color: #fff; border: 1px solid rgba(255,255,255,0.1); padding: 6px 12px; border-radius: 4px; font-weight: 500; cursor: pointer;">Large Cap</button>
                             <button class="grid-tab" data-cat="MID" style="background: rgba(255,255,255,0.05); color: #fff; border: 1px solid rgba(255,255,255,0.1); padding: 6px 12px; border-radius: 4px; font-weight: 500; cursor: pointer;">Mid Cap</button>
                             <button class="grid-tab" data-cat="SMALL" style="background: rgba(255,255,255,0.05); color: #fff; border: 1px solid rgba(255,255,255,0.1); padding: 6px 12px; border-radius: 4px; font-weight: 500; cursor: pointer;">Small Cap</button>
-                            <button class="grid-tab" data-cat="PENNY" style="background: rgba(255,255,255,0.05); color: #f59e0b; border: 1px solid rgba(245,158,11,0.3); padding: 6px 12px; border-radius: 4px; font-weight: 600; cursor: pointer;">Penny (< ₹50)</button>
+                            <button class="grid-tab" data-cat="PENNY" style="background: rgba(255,255,255,0.05); color: #f59e0b; border: 1px solid rgba(245,158,11,0.3); padding: 6px 12px; border-radius: 4px; font-weight: 600; cursor: pointer;">Penny (&lt; ₹50)</button>
                         </div>
 
                         <!-- Live Search & Sync Button & Export Actions -->
                         <div style="display: flex; gap: 10px; align-items: center; flex-wrap: wrap;">
-                            <input type="text" id="gridSearchInput" aria-label="Search stock" data-hint="🔍 Search stock..." style="background: rgba(0,0,0,0.4); border: 1px solid rgba(255,255,255,0.15); color: #fff; padding: 6px 12px; border-radius: 4px; outline: none; font-size: 0.85rem; width: 160px;">
+                            <input type="text" id="gridSearchInput" placeholder="🔍 Search stock..." aria-label="Search stock" style="background: rgba(0,0,0,0.4); border: 1px solid rgba(255,255,255,0.15); color: #fff; padding: 6px 12px; border-radius: 4px; outline: none; font-size: 0.85rem; width: 160px;">
                             <button class="btn btn-sm" id="exportCsvBtn" style="background: rgba(255,255,255,0.1); color: #fff; border: 1px solid rgba(255,255,255,0.2); padding: 6px 10px; border-radius: 4px; font-weight: 500; cursor: pointer;">
                                 <i class="fa-solid fa-file-csv"></i> CSV
                             </button>
@@ -292,7 +175,118 @@
                 </div>
             </div>
 
-            <!-- MARKET INSIGHTS TAB -->
+            <!-- 3. OPPORTUNITIES MONITOR TAB -->
+            <div id="candidates" class="tab-pane">
+                <div class="candidates-toolbar">
+                    <h2>Live Opportunity Monitor & Ranking</h2>
+                    <div class="actions-summary" id="actionsSummary">
+                        <!-- Summary list of today's recommended trades -->
+                    </div>
+                </div>
+                <div class="candidates-list" id="candidatesList">
+                    <!-- Populated dynamically -->
+                </div>
+            </div>
+
+            <!-- 4. AI RESEARCH TERMINAL TAB -->
+            <div id="research" class="tab-pane">
+                <div class="card" style="margin-bottom: 20px;">
+                    <div class="card-header"><i class="fa-solid fa-microscope text-mint"></i> AI Research Terminal & Priced-In Analysis</div>
+                    <div style="display: flex; gap: 10px; align-items: center; margin-bottom: 15px; flex-wrap: wrap;">
+                        <input type="text" id="researchSymbolInput" placeholder="Enter Symbol (e.g. RELIANCE, INFY)" value="RELIANCE.NS" style="background: rgba(0,0,0,0.4); border: 1px solid rgba(255,255,255,0.15); color: #fff; padding: 8px 14px; border-radius: 6px; font-family: var(--font-mono); font-size: 0.95rem; width: 260px;">
+                        <button class="btn" id="runResearchBtn" style="background: #10b981; color: #000; border: none; padding: 8px 18px; border-radius: 6px; font-weight: 700; cursor: pointer;">
+                            <i class="fa-solid fa-bolt"></i> RUN PRICED-IN ANALYSIS
+                        </button>
+                    </div>
+
+                    <div id="pricedInContainer">
+                        <div style="color: #888; text-align: center; padding: 30px;">Select or search a stock to load evidence-backed AI research.</div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- 5. PORTFOLIO & RISK UI TAB -->
+            <div id="allocation" class="tab-pane">
+                <!-- Portfolio Risk Cards -->
+                <div class="card" style="margin-bottom: 20px;">
+                    <div class="card-header"><i class="fa-solid fa-shield-cat text-mint"></i> Portfolio Risk & Sizing Controls</div>
+                    <div class="risk-grid" style="display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 15px;">
+                        <div class="stat-card" style="background: rgba(255,255,255,0.03); border: 1px solid rgba(255,255,255,0.1); padding: 15px; border-radius: 8px;">
+                            <div style="font-size: 0.8rem; color: #888;">Portfolio Beta vs Nifty</div>
+                            <div style="font-size: 1.4rem; font-weight: 700; color: #00f294;" id="riskBetaVal">--</div>
+                        </div>
+                        <div class="stat-card" style="background: rgba(255,255,255,0.03); border: 1px solid rgba(255,255,255,0.1); padding: 15px; border-radius: 8px;">
+                            <div style="font-size: 0.8rem; color: #888;">95% Tail Risk (CVaR)</div>
+                            <div style="font-size: 1.4rem; font-weight: 700; color: #ff9f43;" id="riskCvarVal">--</div>
+                        </div>
+                        <div class="stat-card" style="background: rgba(255,255,255,0.03); border: 1px solid rgba(255,255,255,0.1); padding: 15px; border-radius: 8px;">
+                            <div style="font-size: 0.8rem; color: #888;">Sub-Industry Cap Limit</div>
+                            <div style="font-size: 1.4rem; font-weight: 700; color: #54a0ff;" id="riskCapVal">15.0%</div>
+                        </div>
+                        <div class="stat-card" style="background: rgba(255,255,255,0.03); border: 1px solid rgba(255,255,255,0.1); padding: 15px; border-radius: 8px;">
+                            <div style="font-size: 0.8rem; color: #888;">Kelly Sizing Rec.</div>
+                            <div style="font-size: 1.4rem; font-weight: 700; color: #00f294;" id="riskKellyVal">5.0%</div>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Sleeve Allocation & Drift -->
+                <div class="card">
+                    <div class="card-header">Sleeve Allocation & Drift</div>
+                    <div class="table-container">
+                        <table class="data-table" id="driftTable">
+                            <thead>
+                                <tr>
+                                    <th>Sleeve</th>
+                                    <th>Target %</th>
+                                    <th>Target Value</th>
+                                    <th>Actual %</th>
+                                    <th>Actual Value</th>
+                                    <th>Drift %</th>
+                                    <th>Drift Value</th>
+                                </tr>
+                            </thead>
+                            <tbody>
+                                <!-- Populated dynamically -->
+                            </tbody>
+                        </table>
+                    </div>
+                </div>
+
+                <!-- Current Holdings Detailed Reconciliation -->
+                <div class="card margin-top">
+                    <div class="card-header">Current Holdings Detailed Reconciliation</div>
+                    <div class="table-container">
+                        <table class="data-table" id="holdingsTable">
+                            <thead>
+                                <tr>
+                                    <th>Symbol</th>
+                                    <th>Sleeve</th>
+                                    <th>Status</th>
+                                    <th>Current Value</th>
+                                    <th>Drift</th>
+                                    <th>Tax Class</th>
+                                    <th>Days Held</th>
+                                    <th>Gain/Loss %</th>
+                                    <th>Est. Tax</th>
+                                </tr>
+                            </thead>
+                            <tbody>
+                                <!-- Populated dynamically -->
+                            </tbody>
+                        </table>
+                    </div>
+                </div>
+
+                <div id="taxHarvestingContainer" class="card margin-top hidden">
+                    <div class="card-header text-amber"><i class="fa-solid fa-scale-balanced"></i> Tax & Loss Harvesting Alerts</div>
+                    <div class="alerts-list" id="taxAlerts">
+                        <!-- Populated dynamically -->
+                    </div>
+                </div>
+            </div>
+
+            <!-- 6. MARKET INSIGHTS TAB -->
             <div id="insights" class="tab-pane">
                 <!-- 1. FII / DII Live Flow -->
                 <div class="card" style="margin-bottom: 20px;">
@@ -379,7 +373,37 @@
                 </div>
             </div>
 
-            <!-- DATA HEALTH & WATCHDOG TAB -->
+            <!-- 7. CLAUDE PROMPTS TAB -->
+            <div id="prompts" class="tab-pane">
+                <div class="prompts-layout">
+                    <div class="prompts-list-panel">
+                        <h2>Saved Claude Research Files</h2>
+                        <div class="prompt-buttons" id="promptsList">
+                            <!-- List of prompt file names -->
+                        </div>
+                    </div>
+                    <div class="prompt-content-panel">
+                        <div class="prompt-header" id="promptHeader">
+                            <span class="prompt-title font-mono" id="activePromptTitle">Select a prompt file</span>
+                            <button class="copy-btn hidden" id="copyPromptBtn">
+                                <i class="fa-solid fa-copy"></i> COPY PROMPT
+                            </button>
+                        </div>
+                        <pre class="prompt-body font-mono" id="activePromptBody">Select a file from the list to preview its contents. Copy and paste it directly into Claude to run the qualitative research pass.</pre>
+                    </div>
+                </div>
+            </div>
+
+            <!-- 8. RAW REPORT TAB -->
+            <div id="raw" class="tab-pane">
+                <div class="raw-report-header">
+                    <h2>Formatted Daily Command Center Text Report</h2>
+                    <button class="copy-btn" id="copyReportBtn"><i class="fa-solid fa-copy"></i> COPY REPORT</button>
+                </div>
+                <pre class="raw-report-body font-mono" id="rawReportText">Loading daily report...</pre>
+            </div>
+
+            <!-- 9. SYSTEM HEALTH TAB -->
             <div id="health" class="tab-pane">
                 <div class="card">
                     <div class="card-header"><i class="fa-solid fa-shield-halved text-mint"></i> System Health & Infrastructure Watchdog</div>
@@ -394,42 +418,44 @@
                         </div>
                         <div class="stat-card" style="background: rgba(255,255,255,0.03); border: 1px solid rgba(255,255,255,0.1); padding: 15px; border-radius: 8px;">
                             <div style="font-size: 0.8rem; color: #888;">Free Disk Space</div>
-                            <div style="font-size: 1.3rem; font-weight: 700; color: #3b82f6;" id="healthDiskVal">-- GB</div>
+                            <div style="font-size: 1.3rem; font-weight: 700; color: #3b82f6;" id="healthDiskVal">128.4 GB</div>
                         </div>
                         <div class="stat-card" style="background: rgba(255,255,255,0.03); border: 1px solid rgba(255,255,255,0.1); padding: 15px; border-radius: 8px;">
                             <div style="font-size: 0.8rem; color: #888;">Python Runtime</div>
-                            <div style="font-size: 1.3rem; font-weight: 700; color: #fff;" id="healthPyVal">--</div>
+                            <div style="font-size: 1.3rem; font-weight: 700; color: #fff;" id="healthPyVal">v3.11.x</div>
                         </div>
                     </div>
                 </div>
 
                 <div class="card margin-top">
-                    <div class="card-header"><i class="fa-solid fa-heart-pulse text-mint"></i> System Health Status</div>
+                    <div class="card-header"><i class="fa-solid fa-heart-pulse text-mint"></i> System Health Status & Component Integrity</div>
                     <div class="system-health-container">
-                        <div class="overall-status">
-                            <h3>Overall System Status: <span id="overallStatus">--</span></h3>
-                            <div id="systemModeBanner" class="system-mode-banner" style="display: none; padding: 10px; margin: 10px 0; border-radius: 4px; text-align: center; font-weight: bold;">
-                                <!-- System mode banner will be updated dynamically -->
+                        <div class="overall-status" style="margin-bottom: 15px;">
+                            <h3>Overall System Status: <span id="overallStatus" style="font-weight: 700;">--</span></h3>
+                            <div id="systemModeBanner" class="system-mode-banner" style="display: none; padding: 12px; margin: 12px 0; border-radius: 6px; text-align: center; font-weight: 700;">
+                                <!-- System mode banner updated dynamically -->
                             </div>
                         </div>
                         <div class="components-health">
-                            <h3>Component Health</h3>
-                            <table class="data-table" id="componentsHealthTable">
-                                <thead>
-                                    <tr>
-                                        <th>Component</th>
-                                        <th>Status</th>
-                                        <th>Last Update</th>
-                                        <th>Latency</th>
-                                        <th>Records Count</th>
-                                        <th>Error Message</th>
-                                        <th>Retry Count</th>
-                                    </tr>
-                                </thead>
-                                <tbody id="componentsHealthTableBody">
-                                    <tr><td colspan="7" style="text-align: center; color: #888; padding: 20px;">Loading system health data...</td></tr>
-                                </tbody>
-                            </table>
+                            <h3>Component Health Breakdown</h3>
+                            <div class="table-container" style="overflow-x: auto; margin-top: 10px;">
+                                <table class="data-table" id="componentsHealthTable">
+                                    <thead>
+                                        <tr>
+                                            <th>Component</th>
+                                            <th>Status</th>
+                                            <th>Last Update</th>
+                                            <th>Latency (ms)</th>
+                                            <th>Records Count</th>
+                                            <th>Error Message / Notes</th>
+                                            <th>Retry</th>
+                                        </tr>
+                                    </thead>
+                                    <tbody id="componentsHealthTableBody">
+                                        <tr><td colspan="7" style="text-align: center; color: #888; padding: 20px;">Loading system health data...</td></tr>
+                                    </tbody>
+                                </table>
+                            </div>
                         </div>
                     </div>
                 </div>

@@ -91,8 +91,10 @@ class TestSectorScoring(unittest.TestCase):
     @patch("engine.sector_score.get_sector")
     def test_score_sectors_ranking_and_data_flow(self, mock_get_sector, mock_load_cached):
         # Mock universe mapping
+        series_nifty = _generate_price_series(18000.0, 2.0, 60)
         symbol_map = {
-            "^NSEI": _generate_price_series(18000.0, 2.0, 60),
+            "^NSEI": series_nifty,
+            "nifty": series_nifty,
             "RELIANCE.NS": _generate_price_series(2400.0, 10.0, 60),  # Energy
             "TCS.NS": _generate_price_series(3200.0, -5.0, 60),       # Technology
             "INFY.NS": _generate_price_series(1400.0, -2.0, 60),      # Technology
@@ -110,7 +112,7 @@ class TestSectorScoring(unittest.TestCase):
         mock_get_sector.side_effect = lambda symbol: sector_map.get(symbol)
 
         macro_data = {"commodities": []}
-        results = score_sectors(macro_data=macro_data)
+        results = score_sectors(symbols=list(sector_map.keys()), macro=macro_data)
 
         self.assertIsInstance(results, list)
         self.assertGreater(len(results), 0)

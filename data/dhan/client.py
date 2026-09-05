@@ -53,41 +53,103 @@ class DhanClient:
                 self._sdk = None
 
     def is_active(self) -> bool:
-        """False until the dhanhq package is installed AND real credentials
-        are supplied -- callers should check this before relying on any
-        Dhan-sourced data and fall back to the yfinance/manual-portfolio
-        path otherwise."""
-        return self._sdk is not None
+        return (self._sdk is not None) or bool(self.client_id and self.access_token)
 
     @property
     def sdk(self):
-        """Raw SDK handle for market_data.py / holdings.py to call directly
-        -- None if not active."""
         return self._sdk
 
     def get_ltp(self, instrument_id: str) -> float | None:
         if not self.is_active():
             return None
-
+        if self._sdk is not None and hasattr(self._sdk, "get_ltp"):
+            return self._sdk.get_ltp(instrument_id)
         url = f"https://api.dhan.com/market_data/ltp?instrument_id={instrument_id}"
-        headers = {
-            "Authorization": f"Bearer {self.access_token}"
-        }
-        response = requests.get(url, headers=headers)
-        if response.status_code == 200:
-            return response.json().get("ltp")
+        headers = {"Authorization": f"Bearer {self.access_token}"}
+        try:
+            response = requests.get(url, headers=headers)
+            if response.status_code == 200:
+                return response.json().get("ltp")
+        except Exception:
+            pass
         return None
 
+    def get_holdings(self) -> dict | None:
+        if not self.is_active():
+            return None
+        if self._sdk is not None and hasattr(self._sdk, "get_holdings"):
+            return self._sdk.get_holdings()
+        url = "https://api.dhan.com/holdings"
+        headers = {"Authorization": f"Bearer {self.access_token}"}
+        try:
+            response = requests.get(url, headers=headers)
+            if response.status_code == 200:
+                return response.json()
+        except Exception:
+            pass
+        return None
 
-if __name__ == "__main__":
-    client = DhanClient()
-    if client.is_active():
-        print("Dhan client is active (credentials + SDK present).")
-        instrument_id = "test_instrument_id"  # Replace with actual instrument ID
-        ltp = client.get_ltp(instrument_id)
-        print(f"LTP for instrument {instrument_id}: {ltp}")
-    else:
-        reason = "dhanhq package not installed" if _dhanhq_sdk is None else \
-            "DHAN_CLIENT_ID/DHAN_ACCESS_TOKEN not set"
-        print(f"Dhan client is a stub ({reason}). "
-              "Falling back to yfinance EOD + config/portfolio.json is expected for now.")
+    def get_positions(self) -> dict | None:
+        if not self.is_active():
+            return None
+        if self._sdk is not None and hasattr(self._sdk, "get_positions"):
+            return self._sdk.get_positions()
+        url = "https://api.dhan.com/positions"
+        headers = {"Authorization": f"Bearer {self.access_token}"}
+        try:
+            response = requests.get(url, headers=headers)
+            if response.status_code == 200:
+                return response.json()
+        except Exception:
+            pass
+        return None
+
+    def get_orders(self) -> dict | None:
+        if not self.is_active():
+            return None
+        if self._sdk is not None and hasattr(self._sdk, "get_orders"):
+            return self._sdk.get_orders()
+        url = "https://api.dhan.com/orders"
+        headers = {"Authorization": f"Bearer {self.access_token}"}
+        try:
+            response = requests.get(url, headers=headers)
+            if response.status_code == 200:
+                return response.json()
+        except Exception:
+            pass
+        return None
+
+    def get_trades(self) -> dict | None:
+        if not self.is_active():
+            return None
+        if self._sdk is not None and hasattr(self._sdk, "get_trades"):
+            return self._sdk.get_trades()
+        url = "https://api.dhan.com/trades"
+        headers = {"Authorization": f"Bearer {self.access_token}"}
+        try:
+            response = requests.get(url, headers=headers)
+            if response.status_code == 200:
+                return response.json()
+        except Exception:
+            pass
+        return None
+
+    def get_cash(self) -> dict | None:
+        if not self.is_active():
+            return None
+        if self._sdk is not None and hasattr(self._sdk, "get_fund_limits"):
+            return self._sdk.get_fund_limits()
+        if self._sdk is not None and hasattr(self._sdk, "get_cash"):
+            return self._sdk.get_cash()
+        url = "https://api.dhan.com/cash"
+        headers = {"Authorization": f"Bearer {self.access_token}"}
+        try:
+            response = requests.get(url, headers=headers)
+            if response.status_code == 200:
+                return response.json()
+        except Exception:
+            pass
+        return None
+
+    def get_fund_limits(self) -> dict | None:
+        return self.get_cash()

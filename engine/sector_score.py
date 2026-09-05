@@ -67,7 +67,13 @@ def _above_dma(df, window: int) -> bool | None:
 
 
 def compute_commodity_impact(sector: str, macro: dict) -> str:
-    commodities = {q.name: q.change_pct for q in macro.get("commodities", [])}
+    commodities = {}
+    for q in macro.get("commodities", []):
+        name = getattr(q, "name", None) or (q.get("name") if isinstance(q, dict) else None)
+        chg = getattr(q, "change_pct", None) if hasattr(q, "change_pct") else (q.get("change_pct", 0.0) if isinstance(q, dict) else 0.0)
+        if name:
+            commodities[name] = chg
+
     brent_chg = commodities.get("Brent Crude", 0.0)
     copper_chg = commodities.get("Copper", 0.0)
 
@@ -75,17 +81,23 @@ def compute_commodity_impact(sector: str, macro: dict) -> str:
         return "TAILWIND"
     if sector in _CRUDE_HEADWIND_SECTORS and brent_chg > COMMODITY_MOVE_THRESHOLD_PCT:
         return "HEADWIND"
+    if sector in _CRUDE_TAILWIND_SECTORS and brent_chg < -COMMODITY_MOVE_THRESHOLD_PCT:
+        return "HEADWIND"
+    if sector in _CRUDE_HEADWIND_SECTORS and brent_chg < -COMMODITY_MOVE_THRESHOLD_PCT:
+        return "TAILWIND"
     if sector in _COPPER_TAILWIND_SECTORS and copper_chg > COMMODITY_MOVE_THRESHOLD_PCT:
         return "TAILWIND"
     return "NEUTRAL"
 
 
-def compute_sector_scores(symbols: list[str] | None = None, macro: dict | None = None
+def compute_sector_scores(symbols: list[str] | None = None, macro: dict | None = None, macro_data: dict | None = None, **kwargs
                            ) -> list[SectorScore]:
     symbols = symbols or EQUITY_UNIVERSE
-    macro = macro or {}
+    macro = macro if macro is not None else (macro_data or {})
 
     nifty_df = load_cached("nifty")  # data/fetch.py's fetch_regime_inputs() cache name
+    if nifty_df.empty:
+        return []
     nifty_ret = _return_over(nifty_df, RETURN_WINDOW_DAYS) or 0.0
 
     by_sector: dict[str, list[str]] = {}
@@ -169,6 +181,9 @@ def compute_sector_scores(symbols: list[str] | None = None, macro: dict | None =
 
     scores.sort(key=lambda s: s.overall_score, reverse=True)
     return scores
+
+
+score_sectors = compute_sector_scores
 
 
 if __name__ == "__main__":

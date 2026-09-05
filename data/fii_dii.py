@@ -223,7 +223,9 @@ def get_fii_dii_summary() -> Dict[str, Any]:
             "cum_5d_dii": 0.0,
             "cum_5d_total": 0.0,
             "signal": "NO_DATA",
-            "records_count": 0
+            "records_count": 0,
+            "data_available": False,
+            "is_stale": True
         }
 
     latest = history[-1]
@@ -251,8 +253,18 @@ def get_fii_dii_summary() -> Dict[str, Any]:
     else:
         signal = "NEUTRAL"
 
+    latest_dt_str = latest.get("date")
+    is_stale = False
+    if latest_dt_str:
+        try:
+            latest_dt = datetime.strptime(latest_dt_str, "%Y-%m-%d").date()
+            if (date.today() - latest_dt).days > 5:
+                is_stale = True
+        except Exception:
+            pass
+
     return {
-        "date": latest.get("date"),
+        "date": latest_dt_str,
         "fii_buy": latest.get("fii_buy", 0.0),
         "fii_sell": latest.get("fii_sell", 0.0),
         "fii_net": fii_net,
@@ -264,7 +276,9 @@ def get_fii_dii_summary() -> Dict[str, Any]:
         "cum_5d_dii": round(cum_dii, 2),
         "cum_5d_total": round(cum_total, 2),
         "signal": signal,
-        "records_count": len(history)
+        "records_count": len(history),
+        "data_available": True,
+        "is_stale": is_stale
     }
 
 

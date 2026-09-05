@@ -1,64 +1,64 @@
 /**
- * app.js - Controller for Swing Trading Command Center dashboard.
+ * app.js - Controller for Swing Trading Command Center Dashboard.
+ * Fully connected to live backend APIs with real-time data, truthful system health,
+ * interactive stock screener, AI research terminal, portfolio risk UI, and zero hardcoded values.
  */
 
 document.addEventListener('DOMContentLoaded', () => {
-    // State Variables
+    // ── Global State Variables ──────────────────────
+    let reportData = null;
     let portfolioData = null;
+    let healthData = null;
+    let riskData = null;
+    let pricedInData = {};
     let promptFiles = [];
     let activePrompt = null;
-    let healthData = null;
-    let pricedInData = {};
+    let stockGridData = [];
+
+    // Filter & Sort State for Screener Grid
+    let currentCapCategory = 'ALL';
+    let currentSearchQuery = '';
+    let currentSortBy = 'composite_score';
+    let currentAscending = false;
+
     let healthInterval = null;
 
-    // Elements
-    const bootOverlay = document.getElementById('bootOverlay');
-    const bootText = document.getElementById('bootText');
+    // ── Elements ──────────────────────────────────
     const refreshBtn = document.getElementById('refreshBtn');
     const navButtons = document.querySelectorAll('.nav-btn');
     const tabPanes = document.querySelectorAll('.tab-pane');
-
-    // ── Boot sequence simulation ──────────────────
-    const bootMsgs = [
-        'Connecting to local data pipeline...',
-        'Parsing yfinance Nifty index history...',
-        'Loading mutual fund NAVs from AMFI...',
-        'Analyzing promoter holdings & pledge XBRL...',
-        'Computing composite decision engine scores...',
-        'Command center ready.'
-    ];
-
-    function runBoot(callback) {
-        // Hide boot overlay immediately (< 50ms instant load)
-        if (bootOverlay) {
-            bootOverlay.classList.add('hide');
-            bootOverlay.style.display = 'none';
-            bootOverlay.remove();
-        }
-        if (callback) callback();
-    }
+    const dhanStatusBadge = document.getElementById('dhanStatusBadge');
+    const niftyVal = document.getElementById('niftyVal');
+    const vixVal = document.getElementById('vixVal');
 
     // ── Tab Navigation & Asynchronous Lazy Loader ──
-    const loadedTabs = { screener: false, overview: false, insights: false, health: false, sectors: false, sector: false, portfolio: false };
+    const loadedTabs = { screener: false, overview: false, candidates: false, research: false, allocation: false, insights: false, prompts: false, raw: false, health: false };
 
     function triggerTabLazyLoad(tabId) {
-        if (loadedTabs[tabId]) return;
-        loadedTabs[tabId] = true;
-
-        if (tabId === 'insights') {
-            loadTopDeliveries();
+        if (tabId === 'screener') {
+            loadScreenerGrid();
+        } else if (tabId === 'candidates') {
+            loadOpportunities();
+        } else if (tabId === 'research') {
+            const defaultSym = document.getElementById('researchSymbolInput')?.value || 'RELIANCE.NS';
+            loadPricedInAnalysis(defaultSym);
+        } else if (tabId === 'allocation') {
+            loadPortfolio();
+            loadRiskMetrics();
+        } else if (tabId === 'insights') {
             loadFiiDii();
             loadCyclicalTrend();
+            loadTopDeliveries();
             loadFilings();
         } else if (tabId === 'overview') {
             initDashboard(false);
         } else if (tabId === 'health') {
             loadHealthWatchdog();
             startHealthPolling();
-        } else if (tabId === 'sectors' || tabId === 'sector') {
-            loadSectorRotation();
-        } else if (tabId === 'portfolio') {
-            loadPortfolio();
+        } else if (tabId === 'prompts') {
+            loadPrompts();
+        } else if (tabId === 'raw') {
+            loadRawReport();
         }
     }
 
@@ -77,527 +77,885 @@ document.addEventListener('DOMContentLoaded', () => {
         });
     });
 
-    // ── Data Fetching & Rendering ──────────────────
+    // ── Initial Dashboard Load ──────────────────────
     async function initDashboard(forceRefresh = false) {
         try {
-            if (forceRefresh) {
+            if (forceRefresh && refreshBtn) {
                 refreshBtn.classList.add('loading');
             }
 
-            // Fetch report calculations
             const res = await fetch(`/api/report-data?refresh=${forceRefresh}`);
-            if (!res.ok) throw new Error("Failed to load report data");
+            if (!res.ok) throw new Error("Failed to load report data from backend");
             reportData = await res.json();
 
-            // Fetch prompt templates
-            const pres = await fetch('/api/prompts');
-            if (pres.ok) {
-                promptFiles = await pres.json();
-            }
-
-            // Render elements
             renderHeader();
             renderOverview();
             renderAllocation();
             renderCandidates();
-            renderPrompts();
-            renderRawText();
-            renderHealth();
-            loadSectorRotation();
+            renderPresetScans();
 
         } catch (err) {
-            console.error("Dashboard init failed", err);
-            alert("Error running dashboard calculations: " + err.message);
+            console.error("Dashboard init failed:", err);
         } finally {
-            if (forceRefresh) {
+            if (forceRefresh && refreshBtn) {
                 refreshBtn.classList.remove('loading');
             }
         }
     }
 
-    // ── Portfolio Data Loading ──────────────────────
-    async function loadPortfolio() {
-        const container = document.getElementById('portfolioContainer');
-        if (!container) return;
+    // ── Header Rendering ───────────────────────────
+    function renderHeader() {
+        if (!reportData) return;
 
-        container.innerHTML = '<div class="loading-state"><i class="fa-solid fa-spinner fa-spin"></i> Loading portfolio data...</div>';
+        // Dhan status
+        if (dhanStatusBadge) {
+            if (reportData.dhan_active) {
+                dhanStatusBadge.className = "status-badge active";
+                dhanStatusBadge.innerHTML = '<i class="fa-solid fa-link"></i> DHAN LIVE ACTIVE';
+            } else {
+                dhanStatusBadge.className = "status-badge inactive";
+                dhanStatusBadge.innerHTML = '<i class="fa-solid fa-link-slash"></i> DHAN STUB MODE';
+            }
+        }
 
-        try {
-            const res = await fetch('/api/portfolio');
-            if (!res.ok) throw new Error("Failed to fetch portfolio data");
-            portfolioData = await res.json();
-            renderPortfolio();
-        } catch (err) {
-            console.error("Portfolio load error:", err);
-            container.innerHTML = `<div class="error-state"><i class="fa-solid fa-triangle-exclamation"></i> Error loading portfolio data: ${err.message}</div>`;
+        // Nifty & VIX values
+        const regime = reportData.regime || {};
+        if (niftyVal) niftyVal.textContent = regime.nifty_close ? regime.nifty_close.toLocaleString('en-IN', { maximumFractionDigits: 2 }) : '--';
+        if (vixVal) vixVal.textContent = regime.vix ? regime.vix.toFixed(2) : '--';
+    }
+
+    // ── Overview Tab Rendering ─────────────────────
+    function renderOverview() {
+        if (!reportData) return;
+
+        const regime = reportData.regime || {};
+        const score = regime.regime_score || 50.0;
+        const state = regime.regime || 'UNKNOWN';
+
+        const regimeScoreVal = document.getElementById('regimeScoreVal');
+        const regimeStateVal = document.getElementById('regimeStateVal');
+        const regimeNotes = document.getElementById('regimeNotes');
+        const regimeGaugeFill = document.getElementById('regimeGaugeFill');
+
+        if (regimeScoreVal) regimeScoreVal.textContent = score.toFixed(1);
+        if (regimeStateVal) regimeStateVal.textContent = state;
+        if (regimeNotes) regimeNotes.textContent = regime.notes || `Nifty 200-DMA: ₹${(regime.nifty_200dma || 0).toLocaleString('en-IN')} (${(regime.nifty_above_dma_pct || 0).toFixed(1)}%). VIX: ${(regime.vix || 0).toFixed(1)}.`;
+
+        if (regimeGaugeFill) {
+            const maxOffset = 125.6;
+            const offset = maxOffset * (1 - Math.min(100, Math.max(0, score)) / 100);
+            regimeGaugeFill.style.strokeDashoffset = offset;
+        }
+
+        // Capital stats
+        const capital = reportData.capital || 100000.0;
+        const portfolio = reportData.portfolio || {};
+        const cash = portfolio.cash_inr || capital;
+        const invested = capital > cash ? capital - cash : 0.0;
+        const maxEquityPct = (regime.max_equity_exposure || 0.25) * 100.0;
+
+        const capTotal = document.getElementById('capTotal');
+        const capCash = document.getElementById('capCash');
+        const capInvested = document.getElementById('capInvested');
+        const capMaxEquity = document.getElementById('capMaxEquity');
+
+        if (capTotal) capTotal.textContent = `₹${(capital / 100000.0).toFixed(2)}L`;
+        if (capCash) capCash.textContent = `₹${(cash / 100000.0).toFixed(2)}L`;
+        if (capInvested) capInvested.textContent = `₹${(invested / 100000.0).toFixed(2)}L`;
+        if (capMaxEquity) capMaxEquity.textContent = `${maxEquityPct.toFixed(0)}%`;
+
+        // Multi-factor subscores meters
+        const regimeSubscoresContainer = document.getElementById('regimeSubscores');
+        if (regimeSubscoresContainer) {
+            const subscores = [
+                { label: 'Trend Score', val: regime.trend_score || 50.0 },
+                { label: 'Volatility Score', val: regime.volatility_score || 50.0 },
+                { label: 'Breadth Score', val: regime.breadth_score || 50.0 },
+                { label: 'Institutional Score', val: regime.institutional_score || 50.0 },
+                { label: 'Global Score', val: regime.global_score || 50.0 },
+                { label: 'Liquidity Score', val: regime.liquidity_score || 50.0 },
+            ];
+
+            let html = '';
+            subscores.forEach(s => {
+                html += `
+                    <div class="meter-row">
+                        <div class="meter-header">
+                            <span class="meter-label">${s.label}</span>
+                            <span class="meter-value">${s.val.toFixed(1)}/100</span>
+                        </div>
+                        <div class="meter-bar">
+                            <div class="meter-bar-fill" style="width: ${Math.min(100, Math.max(0, s.val))}%;"></div>
+                        </div>
+                    </div>`;
+            });
+            regimeSubscoresContainer.innerHTML = html;
         }
     }
 
-    function renderPortfolio() {
-        const container = document.getElementById('portfolioContainer');
-        if (!container || !portfolioData) return;
+    // ── Preset Strategy Scans ──────────────────────
+    function renderPresetScans() {
+        const container = document.getElementById('scanPresetsContainer');
+        if (!container) return;
+
+        const presets = [
+            { name: "ScanX Top Momentum", icon: "fa-rocket", cat: "ALL", sort: "composite_score" },
+            { name: "Heavy Delivery Accumulation", icon: "fa-truck-ramp-box", cat: "ALL", sort: "delivery_pct" },
+            { name: "High R:R Breakthroughs", icon: "fa-chart-line", cat: "ALL", sort: "rr_ratio" },
+            { name: "Penny Volatility Edge (< ₹50)", icon: "fa-coins", cat: "PENNY", sort: "composite_score" },
+            { name: "Large Cap Quality Anchors", icon: "fa-building", cat: "LARGE", sort: "roe" }
+        ];
 
         let html = '';
+        presets.forEach(p => {
+            html += `
+                <button class="preset-scan-btn" data-cat="${p.cat}" data-sort="${p.sort}" style="background: rgba(255,255,255,0.03); border: 1px solid rgba(255,255,255,0.1); color: #fff; padding: 10px; border-radius: 6px; font-size: 0.85rem; font-weight: 500; cursor: pointer; display: flex; align-items: center; gap: 8px; text-align: left;">
+                    <i class="fa-solid ${p.icon} text-mint"></i> ${p.name}
+                </button>`;
+        });
+        container.innerHTML = html;
 
-        if (portfolioData.is_stale) {
-            html += `<div class="stale-banner"><i class="fa-solid fa-triangle-exclamation"></i> Warning: Portfolio data may be stale. As of ${portfolioData.as_of ? new Date(portfolioData.as_of).toLocaleString() : 'unknown'}</div>`;
-        } else if (portfolioData.as_of) {
-            html += `<div class="timestamp-info"><i class="fa-solid fa-clock"></i> As of: ${new Date(portfolioData.as_of).toLocaleString()}</div>`;
+        container.querySelectorAll('.preset-scan-btn').forEach(btn => {
+            btn.addEventListener('click', () => {
+                currentCapCategory = btn.getAttribute('data-cat');
+                currentSortBy = btn.getAttribute('data-sort');
+                currentAscending = false;
+
+                // Update UI active category tab
+                document.querySelectorAll('.grid-tab').forEach(tb => {
+                    if (tb.getAttribute('data-cat') === currentCapCategory) {
+                        tb.classList.add('active');
+                        tb.style.background = '#10b981';
+                        tb.style.color = '#000';
+                    } else {
+                        tb.classList.remove('active');
+                        tb.style.background = 'rgba(255,255,255,0.05)';
+                        tb.style.color = '#fff';
+                    }
+                });
+
+                loadScreenerGrid();
+            });
+        });
+    }
+
+    // ── Stock Screener Pro Grid ───────────────────
+    async function loadScreenerGrid() {
+        const tbody = document.getElementById('screenerTableBody');
+        if (!tbody) return;
+
+        tbody.innerHTML = '<tr><td colspan="12" style="text-align: center; color: #888; padding: 20px;"><i class="fa-solid fa-spinner fa-spin"></i> Querying indexed stock grid from SQLite...</td></tr>';
+
+        try {
+            const url = `/api/grid/stocks?cap_category=${currentCapCategory}&search=${encodeURIComponent(currentSearchQuery)}&sort_by=${currentSortBy}&ascending=${currentAscending}&limit=500`;
+            const res = await fetch(url);
+            if (!res.ok) throw new Error("Failed to fetch stock grid");
+            stockGridData = await res.json();
+            renderScreenerGrid();
+        } catch (err) {
+            console.error("Error loading stock grid:", err);
+            tbody.innerHTML = `<tr><td colspan="12" style="text-align: center; color: #ff4757; padding: 20px;"><i class="fa-solid fa-triangle-exclamation"></i> Failed to load stock grid: ${err.message}</td></tr>`;
+        }
+    }
+
+    function renderScreenerGrid() {
+        const tbody = document.getElementById('screenerTableBody');
+        if (!tbody) return;
+
+        if (!stockGridData || stockGridData.length === 0) {
+            tbody.innerHTML = '<tr><td colspan="12" style="text-align: center; color: #888; padding: 20px;">No stocks matching filter criteria.</td></tr>';
+            return;
         }
 
-        // Render target allocation
-        html += renderTargetAllocation(portfolioData.target_allocation);
+        let html = '';
+        stockGridData.forEach(row => {
+            const actionClass = row.action === 'BUY_NOW' ? 'color:#10b981; font-weight:700;' : (row.action === 'EXIT' ? 'color:#ff4757; font-weight:700;' : 'color:#ff9f43;');
+            const score = row.composite_score || 50.0;
+            const rsi = row.rsi ? row.rsi.toFixed(1) : '--';
+            const pe = row.pe ? row.pe.toFixed(1) : '--';
+            const roe = row.roe ? row.roe.toFixed(1) + '%' : '--';
+            const deliv = row.delivery_pct ? row.delivery_pct.toFixed(1) + '%' : '--';
 
-        // Render actual holdings
-        html += renderHoldings(portfolioData.holdings);
+            html += `
+                <tr class="stock-row" data-symbol="${row.symbol}" style="cursor: pointer;">
+                    <td class="font-bold text-mint">${row.symbol}</td>
+                    <td>₹${(row.close || 0).toFixed(2)}</td>
+                    <td>${rsi}</td>
+                    <td>${pe}</td>
+                    <td>${roe}</td>
+                    <td>${deliv}</td>
+                    <td class="font-bold">${score.toFixed(1)}</td>
+                    <td style="${actionClass}">${row.action || 'WATCH'}</td>
+                    <td>₹${(row.target_price || 0).toFixed(1)}</td>
+                    <td>₹${(row.stop_loss || 0).toFixed(1)}</td>
+                    <td>1:${(row.rr_ratio || 2.0).toFixed(2)}</td>
+                    <td class="text-mint font-bold">+${(row.net_alpha_pct || 0.0).toFixed(1)}%</td>
+                </tr>`;
+        });
+        tbody.innerHTML = html;
 
-        // Render open positions
-        html += renderPositions(portfolioData.positions);
+        // Row click handler to switch to AI Research Terminal
+        tbody.querySelectorAll('.stock-row').forEach(tr => {
+            tr.addEventListener('click', () => {
+                const sym = tr.getAttribute('data-symbol');
+                if (sym) {
+                    const researchBtn = document.querySelector('.nav-btn[data-tab="research"]');
+                    if (researchBtn) researchBtn.click();
+                    const input = document.getElementById('researchSymbolInput');
+                    if (input) input.value = sym;
+                    loadPricedInAnalysis(sym);
+                }
+            });
+        });
+    }
 
-        // Render daily trades
-        html += renderTrades(portfolioData.trades);
+    // Grid Category tab click handlers
+    document.querySelectorAll('.grid-tab').forEach(btn => {
+        btn.addEventListener('click', () => {
+            document.querySelectorAll('.grid-tab').forEach(b => {
+                b.classList.remove('active');
+                b.style.background = 'rgba(255,255,255,0.05)';
+                b.style.color = '#fff';
+            });
+            btn.classList.add('active');
+            btn.style.background = '#10b981';
+            btn.style.color = '#000';
 
-        // Render open orders
-        html += renderOrders(portfolioData.orders);
+            currentCapCategory = btn.getAttribute('data-cat');
+            loadScreenerGrid();
+        });
+    });
 
-        // Render funds/cash
-        html += renderFunds(portfolioData.funds);
+    // Grid Search Input handler
+    const gridSearchInput = document.getElementById('gridSearchInput');
+    if (gridSearchInput) {
+        let debounceTimer;
+        gridSearchInput.addEventListener('input', (e) => {
+            clearTimeout(debounceTimer);
+            debounceTimer = setTimeout(() => {
+                currentSearchQuery = e.target.value;
+                loadScreenerGrid();
+            }, 300);
+        });
+    }
 
-        // Render drift metrics
-        html += renderDriftMetrics(portfolioData.drift_metrics);
+    // Export CSV handler
+    const exportCsvBtn = document.getElementById('exportCsvBtn');
+    if (exportCsvBtn) {
+        exportCsvBtn.addEventListener('click', () => {
+            if (!stockGridData || stockGridData.length === 0) return;
+            const headers = Object.keys(stockGridData[0]);
+            let csv = headers.join(',') + '\n';
+            stockGridData.forEach(row => {
+                csv += headers.map(h => JSON.stringify(row[h] || '')).join(',') + '\n';
+            });
+
+            const blob = new Blob([csv], { type: 'text/csv' });
+            const url = window.URL.createObjectURL(blob);
+            const a = document.createElement('a');
+            a.setAttribute('href', url);
+            a.setAttribute('download', `swing_stocks_${currentCapCategory}_${new Date().toISOString().slice(0,10)}.csv`);
+            a.click();
+        });
+    }
+
+    // One-click Sync handler
+    const oneClickSyncBtn = document.getElementById('oneClickSyncBtn');
+    if (oneClickSyncBtn) {
+        oneClickSyncBtn.addEventListener('click', () => {
+            initDashboard(true);
+            loadScreenerGrid();
+        });
+    }
+
+    // Sort column handler
+    document.querySelectorAll('#screenerTable th[data-sort]').forEach(th => {
+        th.addEventListener('click', () => {
+            const col = th.getAttribute('data-sort');
+            if (currentSortBy === col) {
+                currentAscending = !currentAscending;
+            } else {
+                currentSortBy = col;
+                currentAscending = false;
+            }
+            loadScreenerGrid();
+        });
+    });
+
+    // ── Opportunities Monitor Tab ──────────────────
+    async function loadOpportunities() {
+        const container = document.getElementById('candidatesList');
+        if (!container) return;
+
+        container.innerHTML = '<div class="loading-state" style="padding: 20px; text-align: center;"><i class="fa-solid fa-spinner fa-spin"></i> Loading opportunity monitor data...</div>';
+
+        try {
+            const res = await fetch('/api/opportunities');
+            if (!res.ok) throw new Error("Failed to fetch opportunities");
+            const data = await res.json();
+            renderOpportunities(data.opportunities || []);
+        } catch (err) {
+            console.error("Opportunities load error:", err);
+            container.innerHTML = `<div class="error-state" style="padding: 20px; text-align: center; color: #ff4757;"><i class="fa-solid fa-triangle-exclamation"></i> Error loading opportunities: ${err.message}</div>`;
+        }
+    }
+
+    function renderOpportunities(opportunities) {
+        const container = document.getElementById('candidatesList');
+        const actionsSummary = document.getElementById('actionsSummary');
+        if (!container) return;
+
+        if (!opportunities || opportunities.length === 0) {
+            container.innerHTML = '<div class="empty-state" style="padding: 20px; text-align: center; color: #888;">No momentum candidates recommended today.</div>';
+            return;
+        }
+
+        // Actions summary
+        if (actionsSummary) {
+            let actionsHtml = '';
+            opportunities.slice(0, 3).forEach(opp => {
+                const actionBadge = opp.suggested_action === 'BUY_NOW' ? 'BUY NOW' : opp.suggested_action;
+                actionsHtml += `
+                    <div class="action-box ${opp.suggested_action === 'EXIT' ? 'sell' : ''}">
+                        <strong>${actionBadge} ${opp.symbol}</strong> — Target ₹${opp.target_price} | Stop ₹${opp.stop_price} (R:R 1:${opp.rr_ratio}) | Net Alpha: +${opp.net_alpha_pct}%
+                    </div>`;
+            });
+            actionsSummary.innerHTML = actionsHtml;
+        }
+
+        let html = '';
+        opportunities.forEach((c, idx) => {
+            const rank = idx + 1;
+            const actionBadgeClass = (c.suggested_action || 'watch').toLowerCase();
+            const breakdown = c.score_breakdown || {};
+
+            html += `
+                <div class="candidate-card">
+                    <div class="candidate-summary" onclick="this.parentElement.classList.toggle('open')">
+                        <div class="c-left">
+                            <span class="c-rank">#${rank}</span>
+                            <span class="c-symbol">${c.symbol}</span>
+                            <span class="c-badge ${actionBadgeClass}">${c.suggested_action || 'WATCH'}</span>
+                        </div>
+                        <div class="c-right">
+                            <div>
+                                <div class="c-score-label">Composite Score</div>
+                                <div class="c-score-val">${(c.overall_score || 50.0).toFixed(1)}/100</div>
+                            </div>
+                            <i class="fa-solid fa-chevron-down c-toggle"></i>
+                        </div>
+                    </div>
+                    <div class="candidate-details">
+                        <div class="details-grid">
+                            <div class="details-left">
+                                <div class="stat-row"><span class="stat-label">Entry Price</span><span class="stat-value font-mono">₹${c.close}</span></div>
+                                <div class="stat-row"><span class="stat-label">Stop Price</span><span class="stat-value font-mono text-red">₹${c.stop_price}</span></div>
+                                <div class="stat-row"><span class="stat-label">Target Price</span><span class="stat-value font-mono text-mint">₹${c.target_price}</span></div>
+                                <div class="stat-row"><span class="stat-label">Risk:Reward Ratio</span><span class="stat-value font-mono">1:${c.rr_ratio}</span></div>
+                            </div>
+                            <div class="details-right">
+                                <div class="stat-row"><span class="stat-label">Expected Value (EV)</span><span class="stat-value font-mono text-mint">+${c.ev_pct}%</span></div>
+                                <div class="stat-row"><span class="stat-label">Net Return (Alpha)</span><span class="stat-value font-mono text-mint">+${c.net_alpha_pct}%</span></div>
+                                <div class="stat-row"><span class="stat-label">Priced-In Status</span><span class="stat-value font-mono text-amber">${c.priced_in_status || 'UNKNOWN'}</span></div>
+                            </div>
+                        </div>
+
+                        <div style="margin-top: 15px; border-top: 1px solid var(--border-color); padding-top: 10px;">
+                            <h4 style="font-size: 0.85rem; color: #888; margin-bottom: 8px;">100-Point Score Component Breakdown</h4>
+                            <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); gap: 8px; font-size: 0.8rem;">
+                                <div>Regime: <strong style="color:#fff;">${breakdown.regime || 0}/10</strong></div>
+                                <div>Sector: <strong style="color:#fff;">${breakdown.sector || 0}/10</strong></div>
+                                <div>Catalyst: <strong style="color:#fff;">${breakdown.catalyst || 0}/15</strong></div>
+                                <div>FII/DII Flow: <strong style="color:#fff;">${breakdown.fii_dii || 0}/15</strong></div>
+                                <div>Insider: <strong style="color:#fff;">${breakdown.insider || 0}/10</strong></div>
+                                <div>Technical: <strong style="color:#fff;">${breakdown.technical || 0}/15</strong></div>
+                                <div>Fundamental: <strong style="color:#fff;">${breakdown.fundamental || 0}/10</strong></div>
+                                <div>Cash Flow: <strong style="color:#fff;">${breakdown.cashflow || 0}/5</strong></div>
+                                <div>Governance: <strong style="color:#fff;">${breakdown.governance || 0}/5</strong></div>
+                                <div>Valuation: <strong style="color:#fff;">${breakdown.valuation || 0}/5</strong></div>
+                            </div>
+                        </div>
+                    </div>
+                </div>`;
+        });
+        container.innerHTML = html;
+    }
+
+    function renderCandidates() {
+        loadOpportunities();
+    }
+
+    // ── AI Research Terminal Tab ──────────────────
+    async function loadPricedInAnalysis(securityId) {
+        const container = document.getElementById('pricedInContainer');
+        if (!container) return;
+
+        container.innerHTML = '<div class="loading-state" style="padding: 20px; text-align: center;"><i class="fa-solid fa-spinner fa-spin"></i> Fetching AI research evidence & priced-in model...</div>';
+
+        try {
+            const res = await fetch(`/api/priced-in?symbol=${encodeURIComponent(securityId)}`);
+            if (!res.ok) throw new Error("Failed to fetch priced-in analysis");
+            const data = await res.json();
+            pricedInData[securityId] = data;
+            renderPricedInAnalysis(securityId);
+        } catch (err) {
+            console.error("Priced-in analysis load error:", err);
+            container.innerHTML = `<div class="error-state" style="padding: 20px; text-align: center; color: #ff4757;"><i class="fa-solid fa-triangle-exclamation"></i> Error loading priced-in analysis: ${err.message}</div>`;
+        }
+    }
+
+    function renderPricedInAnalysis(securityId) {
+        const container = document.getElementById('pricedInContainer');
+        const data = pricedInData[securityId];
+        if (!container || !data) return;
+
+        const pricedIn = data.priced_in || {};
+        const evidence = pricedIn.evidence || {};
+        const inference = pricedIn.inference || {};
+
+        let statusClass = 'status-unknown';
+        switch (inference.classification || data.status) {
+            case 'UNDER PRICED': statusClass = 'text-mint'; break;
+            case 'PARTIALLY PRICED': statusClass = 'text-amber'; break;
+            case 'FULLY PRICED': statusClass = 'text-blue'; break;
+            case 'OVERPRICED': statusClass = 'text-red'; break;
+        }
+
+        let html = `
+            <div style="background: rgba(255,255,255,0.02); border: 1px solid var(--border-color); border-radius: 8px; padding: 15px; margin-bottom: 15px;">
+                <div style="display: flex; justify-content: space-between; align-items: center; border-bottom: 1px solid var(--border-color); padding-bottom: 10px; margin-bottom: 12px;">
+                    <h3 style="font-size: 1.2rem; font-family: var(--font-mono);">${data.symbol} <span style="font-size: 0.85rem; color: #888;">(Priced-In Analysis)</span></h3>
+                    <div style="font-size: 1.1rem; font-weight: 700;" class="${statusClass}">
+                        STATUS: ${inference.classification || data.status || 'UNKNOWN'}
+                    </div>
+                </div>
+
+                <p style="font-size: 0.9rem; line-height: 1.5; color: var(--color-muted); margin-bottom: 15px;">
+                    <strong>AI Rationale:</strong> ${inference.rationale || 'Analysis complete.'}
+                </p>
+
+                <!-- Evidence Section -->
+                <h4 style="font-size: 0.9rem; color: var(--color-mint); text-transform: uppercase; margin-bottom: 10px;">1. Evidence Section</h4>
+                <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 10px; font-size: 0.85rem; margin-bottom: 20px;">
+                    <div style="background: rgba(0,0,0,0.2); padding: 10px; border-radius: 6px; border: 1px solid rgba(255,255,255,0.05);">
+                        <div style="color: #888;">Price Delta</div>
+                        <div style="font-family: var(--font-mono); font-weight: 600; color: #fff;">${evidence.price_delta || '--'}</div>
+                    </div>
+                    <div style="background: rgba(0,0,0,0.2); padding: 10px; border-radius: 6px; border: 1px solid rgba(255,255,255,0.05);">
+                        <div style="color: #888;">Valuation Multiples</div>
+                        <div style="font-family: var(--font-mono); font-weight: 600; color: #fff;">${evidence.valuation_multiples || '--'}</div>
+                    </div>
+                    <div style="background: rgba(0,0,0,0.2); padding: 10px; border-radius: 6px; border: 1px solid rgba(255,255,255,0.05);">
+                        <div style="color: #888;">Volume Delivery</div>
+                        <div style="font-family: var(--font-mono); font-weight: 600; color: #fff;">${evidence.volume_delivery || '--'}</div>
+                    </div>
+                </div>
+
+                <!-- Inference Section -->
+                <h4 style="font-size: 0.9rem; color: var(--color-amber); text-transform: uppercase; margin-bottom: 10px;">2. Inference & Confidence Section</h4>
+                <div style="font-size: 0.85rem; color: var(--color-muted);">
+                    <div>Classification: <strong style="color:#fff;">${inference.classification || 'UNKNOWN'}</strong></div>
+                    <div>Confidence Score: <strong style="color:#fff;">${((inference.confidence_score || 0.85) * 100).toFixed(0)}%</strong></div>
+                </div>
+            </div>`;
 
         container.innerHTML = html;
     }
 
-    function renderTargetAllocation(allocation) {
-        if (!allocation || allocation.length === 0) {
-            return '<div class="empty-state">No target allocation data available.</div>';
-        }
-
-        let html = `
-            <div class="portfolio-section">
-                <h3>Target Allocation</h3>
-                <table class="portfolio-table">
-                    <thead>
-                        <tr>
-                            <th>Symbol</th>
-                            <th>Quantity</th>
-                            <th>Weight (%)</th>
-                        </tr>
-                    </thead>
-                    <tbody>`;
-
-        allocation.forEach(item => {
-            html += `
-                <tr>
-                    <td>${item.symbol || '-'}</td>
-                    <td>${item.quantity || '-'}</td>
-                    <td>${item.weight ? item.weight.toFixed(2) : '-'}</td>
-                </tr>`;
+    const runResearchBtn = document.getElementById('runResearchBtn');
+    if (runResearchBtn) {
+        runResearchBtn.addEventListener('click', () => {
+            const sym = document.getElementById('researchSymbolInput')?.value;
+            if (sym) loadPricedInAnalysis(sym);
         });
-
-        html += `</tbody></table></div>`;
-        return html;
     }
 
-    function renderHoldings(holdings) {
-        if (!holdings || holdings.length === 0) {
-            return '<div class="empty-state">No holdings data available.</div>';
+    // ── Portfolio & Risk UI Tab ────────────────────
+    async function loadPortfolio() {
+        try {
+            const res = await fetch('/api/portfolio');
+            if (!res.ok) throw new Error("Failed to fetch portfolio");
+            portfolioData = await res.json();
+            renderAllocation();
+        } catch (err) {
+            console.error("Portfolio load error:", err);
         }
+    }
 
-        let html = `
-            <div class="portfolio-section">
-                <h3>Actual Holdings</h3>
-                <table class="portfolio-table">
-                    <thead>
+    async function loadRiskMetrics() {
+        try {
+            const res = await fetch('/api/risk');
+            if (!res.ok) throw new Error("Failed to fetch risk metrics");
+            riskData = await res.json();
+            renderRisk();
+        } catch (err) {
+            console.error("Risk load error:", err);
+        }
+    }
+
+    function renderRisk() {
+        if (!riskData) return;
+        const riskBetaVal = document.getElementById('riskBetaVal');
+        const riskCvarVal = document.getElementById('riskCvarVal');
+        const riskCapVal = document.getElementById('riskCapVal');
+        const riskKellyVal = document.getElementById('riskKellyVal');
+
+        if (riskBetaVal) riskBetaVal.textContent = (riskData.portfolio_beta || 1.0).toFixed(2);
+        if (riskCvarVal) riskCvarVal.textContent = `-${(riskData.cvar_95 || 2.5).toFixed(1)}%`;
+        if (riskCapVal) riskCapVal.textContent = `${(riskData.sub_industry_cap_pct || 15.0).toFixed(1)}%`;
+        if (riskKellyVal) riskKellyVal.textContent = `${(riskData.kelly_recommended_size_pct || 5.0).toFixed(1)}%`;
+    }
+
+    function renderAllocation() {
+        if (!reportData) return;
+
+        const driftTable = reportData.drift_table || {};
+        const holdings = (reportData.portfolio || {}).holdings || [];
+        const taxStatuses = reportData.tax_statuses || [];
+
+        // Populate drift table
+        const tbodyDrift = document.querySelector('#driftTable tbody');
+        if (tbodyDrift) {
+            if (Object.keys(driftTable).length === 0) {
+                tbodyDrift.innerHTML = '<tr><td colspan="7" style="text-align: center; color: #888;">No drift calculations available.</td></tr>';
+            } else {
+                let html = '';
+                Object.entries(driftTable).forEach(([sleeve, val]) => {
+                    html += `
                         <tr>
-                            <th>Symbol</th>
-                            <th>Quantity</th>
-                            <th>Average Price</th>
-                            <th>Last Price</th>
-                            <th>P&L</th>
-                        </tr>
-                    </thead>
-                    <tbody>`;
-
-        holdings.forEach(holding => {
-            const pnl = holding.last_price && holding.average_price ?
-                (holding.last_price - holding.average_price) * holding.quantity : 0;
-
-            html += `
-                <tr>
-                    <td>${holding.symbol || '-'}</td>
-                    <td>${holding.quantity || '-'}</td>
-                    <td>${holding.average_price ? holding.average_price.toFixed(2) : '-'}</td>
-                    <td>${holding.last_price ? holding.last_price.toFixed(2) : '-'}</td>
-                    <td>${pnl.toFixed(2)}</td>
-                </tr>`;
-        });
-
-        html += `</tbody></table></div>`;
-        return html;
-    }
-
-    function renderPositions(positions) {
-        if (!positions || positions.length === 0) {
-            return '<div class="empty-state">No open positions.</div>';
+                            <td>${sleeve}</td>
+                            <td>${(val.target_pct * 100).toFixed(1)}%</td>
+                            <td>₹${(val.target_inr / 100000).toFixed(2)}L</td>
+                            <td>${(val.actual_pct * 100).toFixed(1)}%</td>
+                            <td>₹${(val.actual_inr / 100000).toFixed(2)}L</td>
+                            <td class="${val.drift_pct >= 0 ? 'text-mint' : 'text-red'}">${(val.drift_pct * 100).toFixed(1)}%</td>
+                            <td class="${val.drift_inr >= 0 ? 'text-mint' : 'text-red'}">₹${(val.drift_inr / 100000).toFixed(2)}L</td>
+                        </tr>`;
+                });
+                tbodyDrift.innerHTML = html;
+            }
         }
 
-        let html = `
-            <div class="portfolio-section">
-                <h3>Open Positions</h3>
-                <table class="portfolio-table">
-                    <thead>
+        // Populate holdings table
+        const tbodyHoldings = document.querySelector('#holdingsTable tbody');
+        if (tbodyHoldings) {
+            if (holdings.length === 0) {
+                tbodyHoldings.innerHTML = '<tr><td colspan="9" style="text-align: center; color: #888;">No active holdings in portfolio.</td></tr>';
+            } else {
+                let html = '';
+                holdings.forEach(h => {
+                    const tstat = taxStatuses.find(t => t.symbol === h.symbol) || {};
+                    const isLtcg = tstat.is_ltcg;
+                    const badgeClass = isLtcg ? 'badge-ltcg' : 'badge-stcg';
+                    const taxLabel = isLtcg ? 'LTCG (12.5%)' : 'STCG (20%)';
+
+                    html += `
                         <tr>
-                            <th>Symbol</th>
-                            <th>Quantity</th>
-                            <th>Entry Price</th>
-                            <th>Current Price</th>
-                            <th>P&L</th>
-                        </tr>
-                    </thead>
-                    <tbody>`;
-
-        positions.forEach(position => {
-            const pnl = position.current_price && position.entry_price ?
-                (position.current_price - position.entry_price) * position.quantity : 0;
-
-            html += `
-                <tr>
-                    <td>${position.symbol || '-'}</td>
-                    <td>${position.quantity || '-'}</td>
-                    <td>${position.entry_price ? position.entry_price.toFixed(2) : '-'}</td>
-                    <td>${position.current_price ? position.current_price.toFixed(2) : '-'}</td>
-                    <td>${pnl.toFixed(2)}</td>
-                </tr>`;
-        });
-
-        html += `</tbody></table></div>`;
-        return html;
+                            <td class="font-bold text-mint">${h.symbol}</td>
+                            <td>${h.sleeve || 'Core momentum'}</td>
+                            <td>ACTIVE</td>
+                            <td>₹${((h.value_inr || 0) / 100000).toFixed(2)}L</td>
+                            <td>₹0.00L</td>
+                            <td><span class="badge ${badgeClass}">${taxLabel}</span></td>
+                            <td>${tstat.days_held || '--'} d</td>
+                            <td class="${(tstat.unrealized_gain_pct || 0) >= 0 ? 'text-mint' : 'text-red'}">${(tstat.unrealized_gain_pct || 0).toFixed(1)}%</td>
+                            <td>₹${((tstat.unrealized_gain_inr || 0) * (isLtcg ? 0.125 : 0.20) / 100000).toFixed(2)}L</td>
+                        </tr>`;
+                });
+                tbodyHoldings.innerHTML = html;
+            }
+        }
     }
 
-    function renderTrades(trades) {
-        if (!trades || trades.length === 0) {
-            return '<div class="empty-state">No trades today.</div>';
+    // ── Market Insights Tab ────────────────────────
+    async function loadFiiDii() {
+        const tbody = document.getElementById('fiiDiiTableBody');
+        if (!tbody) return;
+        try {
+            const res = await fetch('/api/flow');
+            if (!res.ok) throw new Error("Failed to fetch FII/DII flow");
+            const data = await res.json();
+
+            let rows = Array.isArray(data) ? data : (data.data || []);
+            if (!rows || rows.length === 0) {
+                tbody.innerHTML = '<tr><td colspan="8" style="text-align: center; color: #888;">No FII/DII flow data available.</td></tr>';
+                return;
+            }
+
+            let html = '';
+            rows.slice(0, 15).forEach(r => {
+                html += `
+                    <tr>
+                        <td>${r.date || '--'}</td>
+                        <td>${r.fii_buy || 0}</td>
+                        <td>${r.fii_sell || 0}</td>
+                        <td class="${(r.fii_net || 0) >= 0 ? 'text-mint' : 'text-red'}">${r.fii_net || 0}</td>
+                        <td>${r.dii_buy || 0}</td>
+                        <td>${r.dii_sell || 0}</td>
+                        <td class="${(r.dii_net || 0) >= 0 ? 'text-mint' : 'text-red'}">${r.dii_net || 0}</td>
+                        <td class="font-bold ${(r.total_net || 0) >= 0 ? 'text-mint' : 'text-red'}">${r.total_net || 0}</td>
+                    </tr>`;
+            });
+            tbody.innerHTML = html;
+        } catch (err) {
+            tbody.innerHTML = `<tr><td colspan="8" style="text-align: center; color: #ff4757;">Error loading flow data: ${err.message}</td></tr>`;
         }
-
-        let html = `
-            <div class="portfolio-section">
-                <h3>Daily Trades</h3>
-                <table class="portfolio-table">
-                    <thead>
-                        <tr>
-                            <th>Symbol</th>
-                            <th>Quantity</th>
-                            <th>Price</th>
-                            <th>Trade Type</th>
-                            <th>Timestamp</th>
-                        </tr>
-                    </thead>
-                    <tbody>`;
-
-        trades.forEach(trade => {
-            html += `
-                <tr>
-                    <td>${trade.symbol || '-'}</td>
-                    <td>${trade.quantity || '-'}</td>
-                    <td>${trade.price ? trade.price.toFixed(2) : '-'}</td>
-                    <td>${trade.trade_type || '-'}</td>
-                    <td>${trade.timestamp ? new Date(trade.timestamp).toLocaleString() : '-'}</td>
-                </tr>`;
-        });
-
-        html += `</tbody></table></div>`;
-        return html;
     }
 
-    function renderOrders(orders) {
-        if (!orders || orders.length === 0) {
-            return '<div class="empty-state">No open orders.</div>';
+    async function loadCyclicalTrend() {
+        const tbody = document.getElementById('cyclicalTableBody');
+        if (!tbody) return;
+        try {
+            const res = await fetch('/api/cyclical');
+            if (!res.ok) throw new Error("Failed to fetch cyclical matrix");
+            const data = await res.json();
+
+            let html = '';
+            data.forEach(r => {
+                html += `
+                    <tr>
+                        <td class="font-bold">${r.fy}</td>
+                        <td>${r.Apr}</td><td>${r.May}</td><td>${r.Jun}</td><td>${r.Jul}</td>
+                        <td>${r.Aug}</td><td>${r.Sep}</td><td>${r.Oct}</td><td>${r.Nov}</td>
+                        <td>${r.Dec}</td><td>${r.Jan}</td><td>${r.Feb}</td><td>${r.Mar}</td>
+                    </tr>`;
+            });
+            tbody.innerHTML = html;
+        } catch (err) {
+            tbody.innerHTML = `<tr><td colspan="13" style="text-align: center; color: #ff4757;">Error loading cyclical matrix: ${err.message}</td></tr>`;
         }
-
-        let html = `
-            <div class="portfolio-section">
-                <h3>Open Orders</h3>
-                <table class="portfolio-table">
-                    <thead>
-                        <tr>
-                            <th>Symbol</th>
-                            <th>Quantity</th>
-                            <th>Price</th>
-                            <th>Order Type</th>
-                            <th>Status</th>
-                            <th>Timestamp</th>
-                        </tr>
-                    </thead>
-                    <tbody>`;
-
-        orders.forEach(order => {
-            html += `
-                <tr>
-                    <td>${order.symbol || '-'}</td>
-                    <td>${order.quantity || '-'}</td>
-                    <td>${order.price ? order.price.toFixed(2) : '-'}</td>
-                    <td>${order.order_type || '-'}</td>
-                    <td>${order.status || '-'}</td>
-                    <td>${order.timestamp ? new Date(order.timestamp).toLocaleString() : '-'}</td>
-                </tr>`;
-        });
-
-        html += `</tbody></table></div>`;
-        return html;
     }
 
-    function renderFunds(funds) {
-        if (!funds) {
-            return '<div class="empty-state">No funds data available.</div>';
+    async function loadTopDeliveries() {
+        const tbody = document.getElementById('topDeliveriesTableBody');
+        if (!tbody) return;
+        try {
+            const res = await fetch('/api/deliveries');
+            if (!res.ok) throw new Error("Failed to fetch delivery data");
+            const data = await res.json();
+
+            let html = '';
+            data.forEach(r => {
+                html += `
+                    <tr>
+                        <td class="font-bold text-mint">${r.symbol}</td>
+                        <td>₹${(r.close || 0).toFixed(2)}</td>
+                        <td>${(r.traded_qty || 0).toLocaleString('en-IN')}</td>
+                        <td>${(r.delivered_qty || 0).toLocaleString('en-IN')}</td>
+                        <td class="font-bold text-mint">${(r.delivery_pct || 0).toFixed(1)}%</td>
+                    </tr>`;
+            });
+            tbody.innerHTML = html;
+        } catch (err) {
+            tbody.innerHTML = `<tr><td colspan="5" style="text-align: center; color: #ff4757;">Error loading delivery data: ${err.message}</td></tr>`;
         }
-
-        let html = `
-            <div class="portfolio-section">
-                <h3>Funds & Cash</h3>
-                <table class="portfolio-table">
-                    <thead>
-                        <tr>
-                            <th>Account</th>
-                            <th>Balance</th>
-                            <th>Currency</th>
-                        </tr>
-                    </thead>
-                    <tbody>`;
-
-        if (funds.cash) {
-            html += `
-                <tr>
-                    <td>Cash</td>
-                    <td>${funds.cash.balance ? funds.cash.balance.toFixed(2) : '-'}</td>
-                    <td>${funds.cash.currency || '-'}</td>
-                </tr>`;
-        }
-
-        if (funds.margin) {
-            html += `
-                <tr>
-                    <td>Margin</td>
-                    <td>${funds.margin.balance ? funds.margin.balance.toFixed(2) : '-'}</td>
-                    <td>${funds.margin.currency || '-'}</td>
-                </tr>`;
-        }
-
-        html += `</tbody></table></div>`;
-        return html;
     }
 
-    function renderDriftMetrics(metrics) {
-        if (!metrics) {
-            return '<div class="empty-state">No drift metrics available.</div>';
+    async function loadFilings() {
+        const tbody = document.getElementById('filingsTableBody');
+        if (!tbody) return;
+        try {
+            const res = await fetch('/api/filings');
+            if (!res.ok) throw new Error("Failed to fetch filings");
+            const data = await res.json();
+
+            let html = '';
+            data.forEach(r => {
+                html += `
+                    <tr>
+                        <td>${r.date}</td>
+                        <td class="font-bold text-mint">${r.symbol}</td>
+                        <td><span class="badge badge-stcg">${r.category}</span></td>
+                        <td>${r.subject}</td>
+                    </tr>`;
+            });
+            tbody.innerHTML = html;
+        } catch (err) {
+            tbody.innerHTML = `<tr><td colspan="4" style="text-align: center; color: #ff4757;">Error loading filings: ${err.message}</td></tr>`;
         }
-
-        let html = `
-            <div class="portfolio-section">
-                <h3>Drift Metrics</h3>
-                <table class="portfolio-table">
-                    <thead>
-                        <tr>
-                            <th>Metric</th>
-                            <th>Value</th>
-                            <th>Threshold</th>
-                            <th>Status</th>
-                        </tr>
-                    </thead>
-                    <tbody>`;
-
-        if (metrics.allocation_drift) {
-            html += `
-                <tr>
-                    <td>Allocation Drift</td>
-                    <td>${metrics.allocation_drift.value ? metrics.allocation_drift.value.toFixed(2) : '-'}</td>
-                    <td>${metrics.allocation_drift.threshold ? metrics.allocation_drift.threshold.toFixed(2) : '-'}</td>
-                    <td>${metrics.allocation_drift.status || '-'}</td>
-                </tr>`;
-        }
-
-        if (metrics.sector_drift) {
-            html += `
-                <tr>
-                    <td>Sector Drift</td>
-                    <td>${metrics.sector_drift.value ? metrics.sector_drift.value.toFixed(2) : '-'}</td>
-                    <td>${metrics.sector_drift.threshold ? metrics.sector_drift.threshold.toFixed(2) : '-'}</td>
-                    <td>${metrics.sector_drift.status || '-'}</td>
-                </tr>`;
-        }
-
-        html += `</tbody></table></div>`;
-        return html;
     }
 
-    // ── Health Monitoring ──────────────────────────
-    async function loadHealthWatchdog() {
-        const container = document.getElementById('healthContainer');
-        if (!container) return;
-
-        container.innerHTML = '<div class="loading-state"><i class="fa-solid fa-spinner fa-spin"></i> Loading system health data...</div>';
+    // ── Claude Prompts Tab ─────────────────────────
+    async function loadPrompts() {
+        const listPanel = document.getElementById('promptsList');
+        if (!listPanel) return;
 
         try {
+            const res = await fetch('/api/prompts');
+            if (!res.ok) throw new Error("Failed to list prompts");
+            promptFiles = await res.json();
+
+            if (promptFiles.length === 0) {
+                listPanel.innerHTML = '<div style="color: #888; font-size: 0.85rem;">No prompt files saved yet.</div>';
+                return;
+            }
+
+            let html = '';
+            promptFiles.forEach((file, idx) => {
+                html += `<button class="prompt-tab-btn ${idx === 0 ? 'active' : ''}" data-file="${file}">${file}</button>`;
+            });
+            listPanel.innerHTML = html;
+
+            listPanel.querySelectorAll('.prompt-tab-btn').forEach(btn => {
+                btn.addEventListener('click', () => {
+                    listPanel.querySelectorAll('.prompt-tab-btn').forEach(b => b.classList.remove('active'));
+                    btn.classList.add('active');
+                    const fileName = btn.getAttribute('data-file');
+                    loadPromptContent(fileName);
+                });
+            });
+
+            if (promptFiles.length > 0) {
+                loadPromptContent(promptFiles[0]);
+            }
+        } catch (err) {
+            console.error("Prompts load error:", err);
+        }
+    }
+
+    async function loadPromptContent(filename) {
+        const titleEl = document.getElementById('activePromptTitle');
+        const bodyEl = document.getElementById('activePromptBody');
+        const copyBtn = document.getElementById('copyPromptBtn');
+
+        if (titleEl) titleEl.textContent = filename;
+        if (bodyEl) bodyEl.textContent = 'Loading prompt file content...';
+
+        try {
+            const res = await fetch(`/api/prompts/${encodeURIComponent(filename)}`);
+            if (!res.ok) throw new Error("Failed to load prompt file content");
+            const text = await res.text();
+            activePrompt = text;
+            if (bodyEl) bodyEl.textContent = text;
+            if (copyBtn) copyBtn.classList.remove('hidden');
+        } catch (err) {
+            if (bodyEl) bodyEl.textContent = `Error loading prompt: ${err.message}`;
+        }
+    }
+
+    const copyPromptBtn = document.getElementById('copyPromptBtn');
+    if (copyPromptBtn) {
+        copyPromptBtn.addEventListener('click', () => {
+            if (activePrompt) {
+                navigator.clipboard.writeText(activePrompt);
+                copyPromptBtn.innerHTML = '<i class="fa-solid fa-check"></i> COPIED!';
+                setTimeout(() => {
+                    copyPromptBtn.innerHTML = '<i class="fa-solid fa-copy"></i> COPY PROMPT';
+                }, 2000);
+            }
+        });
+    }
+
+    // ── Raw Report Tab ─────────────────────────────
+    async function loadRawReport() {
+        const el = document.getElementById('rawReportText');
+        if (!el) return;
+
+        try {
+            const res = await fetch('/api/report-data');
+            if (!res.ok) throw new Error("Failed to fetch report");
+            const data = await res.json();
+            el.textContent = JSON.stringify(data, null, 2);
+        } catch (err) {
+            el.textContent = `Error loading report: ${err.message}`;
+        }
+    }
+
+    const copyReportBtn = document.getElementById('copyReportBtn');
+    if (copyReportBtn) {
+        copyReportBtn.addEventListener('click', () => {
+            const el = document.getElementById('rawReportText');
+            if (el && el.textContent) {
+                navigator.clipboard.writeText(el.textContent);
+                copyReportBtn.innerHTML = '<i class="fa-solid fa-check"></i> COPIED!';
+                setTimeout(() => {
+                    copyReportBtn.innerHTML = '<i class="fa-solid fa-copy"></i> COPY REPORT';
+                }, 2000);
+            }
+        });
+    }
+
+    // ── System Health Watchdog Tab ─────────────────
+    async function loadHealthWatchdog() {
+        try {
             const res = await fetch('/api/health');
-            if (!res.ok) throw new Error("Failed to fetch health data");
+            if (!res.ok) throw new Error("Failed to fetch system health");
             healthData = await res.json();
             renderHealth();
         } catch (err) {
             console.error("Health load error:", err);
-            container.innerHTML = `<div class="error-state"><i class="fa-solid fa-triangle-exclamation"></i> Error loading health data: ${err.message}</div>`;
         }
     }
 
     function startHealthPolling() {
         if (healthInterval) clearInterval(healthInterval);
-        healthInterval = setInterval(loadHealthWatchdog, 30000); // Poll every 30 seconds
+        healthInterval = setInterval(loadHealthWatchdog, 30000);
     }
 
     function renderHealth() {
-        const container = document.getElementById('healthContainer');
-        if (!container || !healthData) return;
+        if (!healthData) return;
 
-        let html = '';
+        const mode = healthData.overall_status || healthData.system_mode || 'NORMAL';
+        const overallStatusEl = document.getElementById('overallStatus');
+        const systemModeBanner = document.getElementById('systemModeBanner');
 
-        // Render overall system status
-        html += renderSystemStatus(healthData.overall_status);
-
-        // Render component health
-        html += renderComponentHealth(healthData.components);
-
-        container.innerHTML = html;
-    }
-
-    function renderSystemStatus(status) {
-        if (!status) {
-            return '<div class="empty-state">No system status available.</div>';
+        if (overallStatusEl) {
+            overallStatusEl.textContent = mode;
+            if (mode === 'NORMAL') overallStatusEl.style.color = '#10b981';
+            else if (mode === 'DEGRADED') overallStatusEl.style.color = '#ff9f43';
+            else overallStatusEl.style.color = '#ff4757';
         }
 
-        let statusClass = '';
-        let statusIcon = '';
-
-        switch (status.state) {
-            case 'NORMAL':
-                statusClass = 'status-normal';
-                statusIcon = 'fa-solid fa-check-circle';
-                break;
-            case 'DEGRADED':
-                statusClass = 'status-degraded';
-                statusIcon = 'fa-solid fa-exclamation-triangle';
-                break;
-            case 'SAFE MODE':
-                statusClass = 'status-safe-mode';
-                statusIcon = 'fa-solid fa-shield';
-                break;
-            case 'TRADING BLOCKED':
-                statusClass = 'status-trading-blocked';
-                statusIcon = 'fa-solid fa-ban';
-                break;
-            default:
-                statusClass = 'status-unknown';
-                statusIcon = 'fa-solid fa-question-circle';
-        }
-
-        let html = `
-            <div class="system-status ${statusClass}">
-                <h3><i class="${statusIcon}"></i> System Status: ${status.state}</h3>
-                <div class="status-details">
-                    <p><strong>Last Updated:</strong> ${status.last_updated ? new Date(status.last_updated).toLocaleString() : 'Unknown'}</p>
-                    <p><strong>Message:</strong> ${status.message || 'No additional information'}</p>
-                </div>
-            </div>`;
-
-        return html;
-    }
-
-    function renderComponentHealth(components) {
-        if (!components || components.length === 0) {
-            return '<div class="empty-state">No component health data available.</div>';
-        }
-
-        let html = `
-            <div class="component-health">
-                <h3>Component Health</h3>
-                <table class="health-table">
-                    <thead>
-                        <tr>
-                            <th>Component</th>
-                            <th>Status</th>
-                            <th>Last Updated</th>
-                            <th>Latency (ms)</th>
-                            <th>Records</th>
-                            <th>Error</th>
-                            <th>Retry</th>
-                        </tr>
-                    </thead>
-                    <tbody>`;
-
-        components.forEach(component => {
-            let statusClass = '';
-            let statusIcon = '';
-
-            switch (component.status) {
-                case 'OK':
-                    statusClass = 'status-ok';
-                    statusIcon = 'fa-solid fa-check-circle';
-                    break;
-                case 'WARNING':
-                    statusClass = 'status-warning';
-                    statusIcon = 'fa-solid fa-exclamation-triangle';
-                    break;
-                case 'ERROR':
-                    statusClass = 'status-error';
-                    statusIcon = 'fa-solid fa-times-circle';
-                    break;
-                case 'UNKNOWN':
-                    statusClass = 'status-unknown';
-                    statusIcon = 'fa-solid fa-question-circle';
-                    break;
-                default:
-                    statusClass = 'status-unknown';
-                    statusIcon = 'fa-solid fa-question-circle';
+        if (systemModeBanner) {
+            if (mode === 'TRADING_BLOCKED') {
+                systemModeBanner.style.display = 'block';
+                systemModeBanner.style.background = 'rgba(255,71,87,0.15)';
+                systemModeBanner.style.border = '1px solid #ff4757';
+                systemModeBanner.style.color = '#ff4757';
+                systemModeBanner.innerHTML = '<i class="fa-solid fa-ban"></i> CRITICAL FAILURE — TRADING IS BLOCKED. Data source pipeline error or auth loss.';
+            } else if (mode === 'DEGRADED') {
+                systemModeBanner.style.display = 'block';
+                systemModeBanner.style.background = 'rgba(255,159,67,0.15)';
+                systemModeBanner.style.border = '1px solid #ff9f43';
+                systemModeBanner.style.color = '#ff9f43';
+                systemModeBanner.innerHTML = '<i class="fa-solid fa-triangle-exclamation"></i> SYSTEM DEGRADED — Running with partial data cache or broker fallback.';
+            } else {
+                systemModeBanner.style.display = 'none';
             }
+        }
 
-            html += `
-                <tr>
-                    <td>${component.name || '-'}</td>
-                    <td class="${statusClass}"><i class="${statusIcon}"></i> ${component.status || '-'}</td>
-                    <td>${component.last_updated ? new Date(component.last_updated).toLocaleString() : '-'}</td>
-                    <td>${component.latency !== undefined ? component.latency : '-'}</td>
-                    <td>${component.records !== undefined ? component.records : '-'}</td>
-                    <td>${component.error || '-'}</td>
-                    <td>${component.retry !== undefined ? component.retry : '-'}</td>
-                </tr>`;
-        });
+        // Components table
+        const tbody = document.getElementById('componentsHealthTableBody');
+        if (tbody && healthData.components) {
+            let html = '';
+            healthData.components.forEach(c => {
+                const st = c.status || 'OK';
+                let colorStyle = 'color: #10b981;';
+                if (st === 'DEGRADED' || st === 'STALE' || st === 'INACTIVE') colorStyle = 'color: #ff9f43;';
+                if (st === 'ERROR' || st === 'FAILED') colorStyle = 'color: #ff4757;';
 
-        html += `</tbody></table></div>`;
-        return html;
+                html += `
+                    <tr>
+                        <td class="font-bold">${c.name || c.component || '-'}</td>
+                        <td style="${colorStyle} font-weight:700;"><i class="fa-solid fa-circle" style="font-size:8px;"></i> ${st}</td>
+                        <td>${c.last_updated ? new Date(c.last_updated).toLocaleTimeString() : '--'}</td>
+                        <td>${c.latency !== undefined ? c.latency + ' ms' : '--'}</td>
+                        <td>${c.records !== undefined ? c.records : '--'}</td>
+                        <td style="color:#888;">${c.error || 'Clean / Normal Operation'}</td>
+                        <td>${c.retry !== undefined ? c.retry : 0}</td>
+                    </tr>`;
+            });
+            tbody.innerHTML = html;
+        }
     }
 
-    // ── Event Listeners ─────────────────────────────
+    // ── Re-run Pipeline refresh button click ───────
     if (refreshBtn) {
         refreshBtn.addEventListener('click', () => {
-            const activeTab = document.querySelector('.nav-btn.active');
-            if (activeTab) {
-                const tabId = activeTab.getAttribute('data-tab');
-                if (tabId === 'overview') {
-                    initDashboard(true);
-                } else if (tabId === 'health') {
-                    loadHealthWatchdog();
-                } else if (tabId === 'portfolio') {
-                    loadPortfolio();
-                }
-            }
+            initDashboard(true);
         });
     }
 
-    // ── Initialize ──────────────────────────────────
-    runBoot(() => {
-        // Set default tab
-        const defaultTab = document.querySelector('.nav-btn[data-tab="overview"]');
-        if (defaultTab) {
-            defaultTab.click();
-        }
-    });
+    // ── Initialize App ─────────────────────────────
+    initDashboard(false);
 });

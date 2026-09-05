@@ -137,6 +137,7 @@ def analyze_symbol_institutional_flow(symbol: str, delivery_pct: float = 0.0, pr
             })
     except Exception as exc:
         log.debug(f"Could not fetch bulk deals for {bare_symbol}: {exc}")
+        bulk_deals = None
 
     insider_trades = []
     insider_buy_val = 0.0
@@ -165,6 +166,7 @@ def analyze_symbol_institutional_flow(symbol: str, delivery_pct: float = 0.0, pr
                 })
     except Exception as exc:
         log.debug(f"Could not fetch insider trades for {bare_symbol}: {exc}")
+        insider_trades = None
 
     shareholding_info = None
     free_float_info = {"free_float_pct": 35.0, "is_illiquid": False, "warning": "LIQUID_FLOAT"}
@@ -184,6 +186,7 @@ def analyze_symbol_institutional_flow(symbol: str, delivery_pct: float = 0.0, pr
             }
     except Exception as exc:
         log.debug(f"Could not fetch shareholding for {bare_symbol}: {exc}")
+        shareholding_info = None
 
     # Calculate overall symbol flow score (0 to 100)
     score = 50.0

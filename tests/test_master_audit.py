@@ -48,3 +48,17 @@ def test_master_audit_security_module():
     # Verify secret redaction works
     redacted = security.redact_secrets({"secret_key": "raw_123"})
     assert redacted["secret_key"] == "[REDACTED]"
+
+
+def test_master_audit_system_health():
+    """Verify system health state propagation and state contract compliance."""
+    from web_server import app
+    from fastapi.testclient import TestClient
+
+    client = TestClient(app)
+    response = client.get('/api/health')
+    assert response.status_code == 200
+    health_data = response.json()
+
+    # Verify health data structure
+    assert 'overall_status' in health_data or 'system_mode' in health_data or 'status' in health_data

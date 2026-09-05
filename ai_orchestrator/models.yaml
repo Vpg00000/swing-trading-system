@@ -24,7 +24,7 @@ models:
     task_types: [coding, planning, reviewing, private]
     quality: {coding: 0.85, planning: 0.65, reviewing: 0.70, private: 1.00}
     base_quality: 0.75
-    priority: 100
+    priority: 80
     enabled: true
     free: true
     local: true
@@ -123,7 +123,7 @@ models:
     task_types: [coding, planning, reviewing, classification]
     quality: {coding: 0.90, planning: 0.88, reviewing: 0.86, classification: 0.90}
     base_quality: 0.88
-    priority: 92
+    priority: 98
     enabled: true             # ← ENABLED (Groq API key active)
     free: true
     local: false
@@ -246,7 +246,7 @@ models:
     task_types: [coding, reviewing]
     quality: {coding: 0.92, reviewing: 0.85}
     base_quality: 0.88
-    priority: 91
+    priority: 99
     enabled: true             # ← ENABLED (Mistral API key active)
     free: true
     local: false

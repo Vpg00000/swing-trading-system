@@ -65,6 +65,66 @@ class TestDhanConnectivity(unittest.TestCase):
         with self.assertRaises(DhanError):
             get_ohlc('RELIANCE', '1D', '2023-04-01', '2023-04-01', client)
 
+    def test_get_holdings_success(self):
+        client = DhanClient()
+        client._sdk = self.mock_sdk
+        expected_data = {
+            'status': 'success',
+            'data': [{'symbol': 'RELIANCE', 'quantity': 10, 'avg_price': 2800.0}]
+        }
+        self.mock_sdk.get_holdings.return_value = expected_data
+
+        result = client.get_holdings()
+        self.assertEqual(result, expected_data)
+
+    def test_get_positions_success(self):
+        client = DhanClient()
+        client._sdk = self.mock_sdk
+        expected_data = {
+            'status': 'success',
+            'data': [{'symbol': 'RELIANCE', 'quantity': 10, 'avg_price': 2800.0}]
+        }
+        self.mock_sdk.get_positions.return_value = expected_data
+
+        result = client.get_positions()
+        self.assertEqual(result, expected_data)
+
+    def test_get_orders_success(self):
+        client = DhanClient()
+        client._sdk = self.mock_sdk
+        expected_data = {
+            'status': 'success',
+            'data': [{'order_id': '123', 'symbol': 'RELIANCE', 'quantity': 10, 'price': 2800.0}]
+        }
+        self.mock_sdk.get_orders.return_value = expected_data
+
+        result = client.get_orders()
+        self.assertEqual(result, expected_data)
+
+    def test_get_trades_success(self):
+        client = DhanClient()
+        client._sdk = self.mock_sdk
+        expected_data = {
+            'status': 'success',
+            'data': [{'trade_id': '123', 'symbol': 'RELIANCE', 'quantity': 10, 'price': 2800.0}]
+        }
+        self.mock_sdk.get_trades.return_value = expected_data
+
+        result = client.get_trades()
+        self.assertEqual(result, expected_data)
+
+    def test_get_fund_limits_success(self):
+        client = DhanClient()
+        client._sdk = self.mock_sdk
+        expected_data = {
+            'status': 'success',
+            'data': {'available_balance': 100000.0, 'used_margin': 50000.0}
+        }
+        self.mock_sdk.get_fund_limits.return_value = expected_data
+
+        result = client.get_fund_limits()
+        self.assertEqual(result, expected_data)
+
 
 if __name__ == '__main__':
     unittest.main()

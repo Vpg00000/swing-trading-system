@@ -1,10 +1,10 @@
 from __future__ import annotations
 
 import subprocess
+import time
 from pathlib import Path
 
 from tasks import Task
-
 
 class ContextBuilder:
     def __init__(
@@ -26,17 +26,22 @@ class ContextBuilder:
 
     def _git(self, *args: str) -> str:
         try:
+            start_time = time.time()
             result = subprocess.run(
                 ["git", *args],
                 cwd=self.root,
                 capture_output=True,
                 text=True,
                 timeout=30,
-                check=False,
+                check=True,
             )
+            latency = time.time() - start_time
+            print(f"Git command latency: {latency:.4f} seconds")
 
             return result.stdout.strip()
 
+        except subprocess.CalledProcessError as exc:
+            return f"[GIT ERROR: {exc.stderr.strip()}]"
         except Exception as exc:
             return f"[GIT ERROR: {exc}]"
 
@@ -112,6 +117,18 @@ class ContextBuilder:
                 "--oneline",
                 "-10",
             )
+        )
+
+        # Add section for holdings/positions/orders/trades/cash verification
+        sections.append(
+            "# HOLDINGS/POSITIONS/ORDERS/TRADES/CASH VERIFICATION\n\n"
+            "Please verify the following:\n"
+            "- Actual holdings\n"
+            "- Current positions\n"
+            "- Recent orders\n"
+            "- Executed trades\n"
+            "- Available cash\n"
+            "Ensure all data is accurate and up-to-date."
         )
 
         return "\n\n---\n\n".join(sections)
