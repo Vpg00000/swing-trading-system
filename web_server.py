@@ -9,7 +9,7 @@ import logging
 import datetime
 import time
 import json
-from typing import Optional, List
+from typing import Optional, List, Dict, Any
 from pathlib import Path
 from fastapi import FastAPI, HTTPException, Query
 from fastapi.staticfiles import StaticFiles
@@ -20,7 +20,8 @@ from fastapi.middleware.cors import CORSMiddleware
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
 from engine.report import generate_report_data, build_report
-from engine.portfolio_manager import fetch_and_store_portfolio_state
+from engine.portfolio_manager import fetch_and_store_portfolio_state, reconcile_portfolio_state, generate_portfolio_snapshot
+from engine.priced_in import classify_priced_in
 try:
     from src.system_health import get_system_health_data
 except ImportError:
@@ -151,8 +152,10 @@ async def get_portfolio():
     """Endpoint to fetch, store, and reconcile the latest Dhan portfolio state."""
     try:
         portfolio_data = fetch_and_store_portfolio_state()
-        # Redact portfolio_data before sending in the response
-        return JSONResponse(content=redact_sensitive_data(portfolio_data))
+        reconciled_state = reconcile_portfolio_state(portfolio_data)
+        snapshot = generate_portfolio_snapshot(reconciled_state)
+        # Redact snapshot before sending in the response
+        return JSONResponse(content=redact_sensitive_data(snapshot))
     except Exception as exc:
         logging.error(f"Failed to fetch and store portfolio state: {exc}")
         raise HTTPException(status_code=500, detail=str(exc))
@@ -418,6 +421,55 @@ async def get_forensics(symbol: Optional[str] = Query(None)):
         return JSONResponse(content=result)
     except Exception as exc:
         logging.error(f"Failed to fetch forensic data: {exc}")
+        raise HTTPException(status_code=500, detail=str(exc))
+
+@app.get("/api/priced-in")
+async def get_priced_in(symbol: str = Query(...)):
+    """Endpoint to fetch priced-in analysis for a stock symbol."""
+    try:
+        priced_in_data = classify_priced_in(symbol)
+
+        if priced_in_data is None:
+            return JSONResponse(
+                status_code=200,
+                content={
+                    "status": "unavailable",
+                    "message": "Priced-in analysis data is unavailable or could not be generated",
+                    "symbol": symbol,
+                    "priced_in": None
+                }
+            )
+
+        # Ensure classification is one of the allowed values
+        allowed_classifications = ["UNDER PRICED", "PARTIALLY PRICED", "FULLY PRICED", "OVERPRICED", "UNKNOWN"]
+        if priced_in_data.get("classification") not in allowed_classifications:
+            priced_in_data["classification"] = "UNKNOWN"
+
+        # Ensure confidence_score is a float between 0 and 1
+        if not isinstance(priced_in_data.get("confidence_score"), float) or priced_in_data.get("confidence_score") < 0 or priced_in_data.get("confidence_score") > 1:
+            priced_in_data["confidence_score"] = 0.0
+
+        # Structure output into evidence and inference sections
+        result = {
+            "symbol": symbol,
+            "priced_in": {
+                "evidence": {
+                    "price_delta": priced_in_data.get("price_delta"),
+                    "valuation_multiples": priced_in_data.get("valuation_multiples"),
+                    "volume_delivery": priced_in_data.get("volume_delivery"),
+                    "numerical_breakdown": priced_in_data.get("numerical_breakdown")
+                },
+                "inference": {
+                    "classification": priced_in_data.get("classification"),
+                    "confidence_score": priced_in_data.get("confidence_score"),
+                    "rationale": priced_in_data.get("rationale")
+                }
+            },
+            "timestamp": datetime.datetime.now(datetime.timezone.utc).isoformat()
+        }
+        return JSONResponse(content=result)
+    except Exception as exc:
+        logging.error(f"Failed to fetch priced-in analysis: {exc}")
         raise HTTPException(status_code=500, detail=str(exc))
 
 if WEB_DIR.exists():

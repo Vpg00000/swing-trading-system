@@ -1,0 +1,138 @@
+import json
+import datetime
+from data.dhan.client import DhanClient
+from data.dhan.holdings import get_holdings, get_positions, get_orders, get_trades, get_cash
+from data.database import get_connection, upsert_portfolio_snapshot
+
+class PortfolioManager:
+    def __init__(self):
+        self.client = DhanClient()
+
+    def fetch_and_store_portfolio(self):
+        holdings = get_holdings(self.client)
+        if not holdings:
+            return None
+
+        positions = get_positions(self.client)
+        orders = get_orders(self.client)
+        trades = get_trades(self.client)
+        cash = get_cash(self.client)
+
+        portfolio_state = {
+            "holdings": holdings,
+            "positions": positions,
+            "orders": orders,
+            "trades": trades,
+            "cash": cash,
+            "timestamp": datetime.datetime.now().isoformat()
+        }
+
+        return self.store_portfolio_state(portfolio_state)
+
+    def aggregate_portfolio_state(self, holdings, positions, orders, trades, cash):
+        return {
+            "holdings": holdings,
+            "positions": positions,
+            "orders": orders,
+            "trades": trades,
+            "cash": cash,
+            "timestamp": datetime.datetime.now().isoformat()
+        }
+
+    def reconcile_portfolio(self, portfolio_state):
+        holdings = portfolio_state.get('holdings', [])
+        positions = portfolio_state.get('positions', [])
+        orders = portfolio_state.get('orders', [])
+        trades = portfolio_state.get('trades', [])
+        cash = portfolio_state.get('cash', 0.0)
+
+        # Calculate net asset value (NAV)
+        nav = sum(holding['quantity'] * holding['price'] for holding in holdings) + cash
+
+        # Calculate total invested value
+        total_invested = sum(trade['quantity'] * trade['price'] for trade in trades)
+
+        # Calculate realized P&L
+        realized_pnl = sum(trade['quantity'] * (trade['price'] - trade['average_price']) for trade in trades)
+
+        # Calculate unrealized P&L
+        unrealized_pnl = sum((holding['quantity'] - sum(trade['quantity'] for trade in trades if trade['symbol'] == holding['symbol'])) * (holding['price'] - trade['average_price']) for holding in holdings for trade in trades if trade['symbol'] == holding['symbol'])
+
+        # Calculate position drift
+        position_drift = sum(abs(position['quantity'] - sum(trade['quantity'] for trade in trades if trade['symbol'] == position['symbol'])) for position in positions)
+
+        # Calculate quantity drift
+        quantity_drift = sum(abs(holding['quantity'] - sum(trade['quantity'] for trade in trades if trade['symbol'] == holding['symbol'])) for holding in holdings)
+
+        # Calculate weight drift
+        weight_drift = sum(abs(holding['quantity'] * holding['price'] - sum(trade['quantity'] * trade['price'] for trade in trades if trade['symbol'] == holding['symbol'])) for holding in holdings)
+
+        # Calculate capacity
+        capacity = sum(holding['quantity'] * holding['price'] for holding in holdings)
+
+        # Calculate cash reserve
+        cash_reserve = cash
+
+        return {
+            "nav": nav,
+            "total_invested": total_invested,
+            "cash": cash,
+            "realized_pnl": realized_pnl,
+            "unrealized_pnl": unrealized_pnl,
+            "position_drift": position_drift,
+            "quantity_drift": quantity_drift,
+            "weight_drift": weight_drift,
+            "capacity": capacity,
+            "cash_reserve": cash_reserve,
+            "timestamp": datetime.datetime.now().isoformat()
+        }
+
+    def store_portfolio_state(self, portfolio_state):
+        conn = get_connection()
+        cursor = conn.cursor()
+
+        # Using prepared statements to avoid SQL injection
+        prepared = {
+            'holdings': json.dumps(portfolio_state.get('holdings', [])),
+            'positions': json.dumps(portfolio_state.get('positions', [])),
+            'orders': json.dumps(portfolio_state.get('orders', [])),
+            'trades': json.dumps(portfolio_state.get('trades', [])),
+            'cash': portfolio_state.get('cash', 0.0),
+            'timestamp': portfolio_state.get('timestamp', datetime.datetime.now().isoformat())
+        }
+
+        cursor.execute("""
+            INSERT INTO portfolio_snapshots
+            (holdings, positions, orders, trades, cash, timestamp)
+            VALUES (?, ?, ?, ?, ?, ?)
+        """, tuple(prepared.values()))
+
+        conn.commit()
+        conn.close()
+
+def fetch_and_store_portfolio_state():
+    manager = PortfolioManager()
+    return manager.fetch_and_store_portfolio()
+
+def reconcile_portfolio_state(portfolio_state=None):
+    manager = PortfolioManager()
+    if portfolio_state is None:
+        portfolio_state = manager.fetch_and_store_portfolio() or {}
+    return manager.reconcile_portfolio(portfolio_state)
+
+def generate_portfolio_snapshot(portfolio_state=None):
+    manager = PortfolioManager()
+    if portfolio_state is None:
+        portfolio_state = manager.fetch_and_store_portfolio() or {}
+    return manager.aggregate_portfolio_state(
+        portfolio_state.get('holdings', []),
+        portfolio_state.get('positions', []),
+        portfolio_state.get('orders', []),
+        portfolio_state.get('trades', []),
+        portfolio_state.get('cash', 0.0)
+    )
+
+# Example usage
+if __name__ == "__main__":
+    portfolio_state = fetch_and_store_portfolio_state()
+    print(portfolio_state)
