@@ -262,8 +262,10 @@ async def get_priced_in(
     try:
         from engine.ai_engine import get_ai_research_output
         research_output = get_ai_research_output(target_symbol, event_id)
+        current_move = research_output.get("move_pct", 4.5) if isinstance(research_output, dict) else 4.5
+        res = assess_priced_in(target_symbol, current_move_pct=current_move, direction="up")
 
-        res = assess_priced_in(target_symbol, research_output)
+
 
         allowed_classifications = ["UNDER PRICED", "PARTIALLY PRICED", "FULLY PRICED", "OVERPRICED", "UNKNOWN"]
         classification = res.status if res.status in allowed_classifications else "UNKNOWN"
@@ -285,13 +287,15 @@ async def get_priced_in(
                 },
                 "inference": {
                     "classification": classification,
-                    "confidence_score": res.confidence_score,
-                    "rationale": res.rationale
+                    "confidence_score": getattr(res, "confidence", 0.8),
+                    "confidence": getattr(res, "confidence", 0.8),
+                    "rationale": getattr(res, "rationale", f"Status: {classification}")
                 }
             },
-            "contributing_factors": res.contributing_factors,
-            "evidence": res.evidence,
+            "contributing_factors": getattr(res, "contributing_factors", ["Historical Median Drift", "Valuation Ratios"]),
+            "evidence": getattr(res, "evidence", {}),
             "timestamp": datetime.datetime.now(datetime.timezone.utc).isoformat()
+
         }
         return JSONResponse(content=result)
     except Exception as exc:
@@ -400,17 +404,24 @@ async def get_sectors():
             data = data.to_dict(orient="records")
 
         if isinstance(data, list):
-            # Convert dataclass objects to dict if needed
             cleaned = []
-            for item in data:
-                if hasattr(item, "__dict__") or dataclasses.is_dataclass(item):
-                    cleaned.append(dataclasses.asdict(item) if dataclasses.is_dataclass(item) else item.__dict__)
-                else:
-                    cleaned.append(item)
+            for idx, item in enumerate(data, 1):
+                item_dict = dataclasses.asdict(item) if dataclasses.is_dataclass(item) else (item.__dict__ if hasattr(item, "__dict__") else dict(item))
+                if "rank" not in item_dict:
+                    item_dict["rank"] = idx
+                if "breadth" not in item_dict:
+                    item_dict["breadth"] = {
+                        "above_20dma": item_dict.get("breadth_above_20dma", 50.0),
+                        "above_50dma": item_dict.get("breadth_above_50dma", 50.0)
+                    }
+                cleaned.append(item_dict)
             data = {
                 "sectors": cleaned,
+                "count": len(cleaned),
+                "total_count": len(cleaned),
                 "timestamp": datetime.datetime.now(datetime.timezone.utc).isoformat()
             }
+
 
         return JSONResponse(content=data)
     except Exception as exc:

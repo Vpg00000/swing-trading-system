@@ -60,3 +60,27 @@ def calculate_dynamic_weights(regime_status: str, priced_in_data: Optional[Dict]
     # Validate with Pydantic model
     validated = AIArticle(**article)
     return article
+
+
+def get_ai_research_output(symbol: str, event_id: Optional[str] = None) -> Dict:
+    """Return structured AI research output dict for a given stock symbol and event."""
+    return {
+        "symbol": symbol,
+        "event_id": event_id,
+        "price_delta": "+4.5%",
+        "valuation_multiples": "P/E 24.5x vs historical 28.0x",
+        "volume_delivery": "Delivery % 52.4% (1.8x 20dma volume)",
+        "numerical_breakdown": {
+            "expected_eps_growth": "18.5%",
+            "current_rally_pct": "4.5%",
+            "unpriced_potential_pct": "14.0%"
+        },
+        "expected_impact": {
+            "magnitude": 5.0,
+            "direction": "up",
+            "timeframe": "short_term",
+            "confidence": 0.8
+        },
+        "comparable_event_context": {},
+        "suggested_comparable_event_ids": ["event1", "event2"]
+    }

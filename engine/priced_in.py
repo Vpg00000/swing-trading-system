@@ -300,49 +300,45 @@ def assess_priced_in(symbol: str, current_move_pct: float = 0.0, direction: str 
         institutional_flow=ev.get("institutional_flow")
     )
 
+# Function aliases for backward compatibility and test patching
+get_market_data = get_current_market_data
+get_valuation_metrics = get_current_valuation_metrics
+get_historical_events = get_historical_comparable_events
+
 class PricedInAnalysis:
     @staticmethod
-    def analyze_opportunity(security_id: str, event_id: str, ai_research_output: Dict[str, float]) -> PricedInResult:
+    def analyze_opportunity(security_id: str, event_id: Optional[str] = None, ai_research_output: Optional[Dict[str, Any]] = None) -> PricedInResult:
         """Analyze the priced-in status of an opportunity."""
-        # Fetch current market data
-        current_market_data = get_current_market_data(security_id)
+        if not security_id:
+            return PricedInResult(symbol="", current_move_pct=0.0, historical_median_pct=0.0, comparable_events_count=0, status="UNKNOWN", confidence=0.0)
 
-        # Fetch current valuation metrics
-        current_valuation_metrics = get_current_valuation_metrics(security_id)
-
-        # Retrieve historical comparable events data
-        comparable_events_data = get_historical_comparable_events(
+        ai_res = ai_research_output or {}
+        comp_events = get_historical_comparable_events(
             security_id,
-            ai_research_output.get("comparable_event_context", {}),
-            ai_research_output.get("suggested_comparable_event_ids", [])
+            ai_res.get("comparable_event_context", {}) if isinstance(ai_res, dict) else {},
+            ai_res.get("suggested_comparable_event_ids", []) if isinstance(ai_res, dict) else []
         )
+        comp_list = comp_events if isinstance(comp_events, list) else []
 
-        # Classify the priced-in state
-        priced_in_state = classify_priced_in_state(
-            current_market_data,
-            ai_research_output.get("expected_impact", {}),
-            current_valuation_metrics,
-            comparable_events_data,
-            ai_research_output
-        )
+        val_metrics = get_current_valuation_metrics(security_id)
+        val_dict = val_metrics if isinstance(val_metrics, dict) else {}
 
-        # Create and return the PricedInResult
-        return PricedInResult(
+        res = assess_priced_in(
             symbol=security_id,
-            current_move_pct=current_market_data.get("move_pct", 0.0),
-            historical_median_pct=0.0,  # Placeholder for historical median percentage
-            comparable_events_count=len(comparable_events_data),
-            status=priced_in_state.get("inference", {}).get("status", "UNKNOWN"),
-            confidence=priced_in_state.get("inference", {}).get("confidence", 0.0),
-            pe_ratio=current_valuation_metrics.get("pe_ratio"),
-            pb_ratio=current_valuation_metrics.get("pb_ratio"),
-            ev_ebitda=current_valuation_metrics.get("ev_ebitda"),
-            corporate_event_impact=ai_research_output.get("corporate_event_impact"),
-            institutional_flow=ai_research_output.get("institutional_flow")
+            comparable_events=comp_list,
+            pe_ratio=val_dict.get("pe_ratio"),
+            pb_ratio=val_dict.get("pb_ratio"),
+            ev_ebitda=val_dict.get("ev_ebitda"),
+            corporate_event_impact=ai_res.get("corporate_event_impact") if isinstance(ai_res, dict) else None,
+            institutional_flow=ai_res.get("institutional_flow") if isinstance(ai_res, dict) else None
         )
+        if comp_list and res.comparable_events_count == 0:
+            res.comparable_events_count = len(comp_list)
+        return res
 
 classify_priced_in = analyze_priced_in
 priced_in_analysis = analyze_priced_in
+
 
 if __name__ == "__main__":
     from engine.news import scan_for_price_volume_events

@@ -127,18 +127,14 @@ def enforce_sub_industry_cap(
 
 def calculate_portfolio_beta(weights: Dict[str, float], asset_betas: Dict[str, float]) -> float:
     """
-    Computes aggregate weighted Portfolio Beta vs Nifty benchmark: Beta_P = Sum(w_i * Beta_i).
+    Computes aggregate Portfolio Beta exposure vs Nifty benchmark: Beta_P = Sum(w_i * Beta_i).
     """
-    p_beta = 0.0
-    total_w = sum(weights.values())
-    if total_w <= 0:
-        return 1.0
+    return round(sum(w * asset_betas.get(sym, 1.0) for sym, w in weights.items()), 4)
 
-    for sym, w in weights.items():
-        b = asset_betas.get(sym, 1.0)
-        p_beta += (w / total_w) * b
 
-    return round(p_beta, 4)
+
+
+
 
 
 def optimize_sharpe_weights(expected_returns: Dict[str, float], asset_volatilities: Dict[str, float]) -> Dict[str, float]:
@@ -295,6 +291,8 @@ def enforce_hard_risk_constraints(
         if p_beta > cfg.max_portfolio_beta and p_beta > 0:
             scale_factor = cfg.max_portfolio_beta / p_beta
             adjusted_w = {sym: round(w * scale_factor, 4) for sym, w in adjusted_w.items()}
+
+
 
     # Step 4: CVaR adjustment scaling if needed
     if returns_matrix and adjusted_w:

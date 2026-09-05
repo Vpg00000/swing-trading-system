@@ -114,9 +114,10 @@ def test_drawdown_limit_hard_stop_blocking():
 
 def test_portfolio_beta_capping():
     """Portfolio with beta > 1.0 is scaled down to maintain beta <= 1.0 limit."""
-    weights = {"HIGH_BETA_1.NS": 0.15, "HIGH_BETA_2.NS": 0.15}
+    weights = {"HIGH_BETA_1.NS": 0.50, "HIGH_BETA_2.NS": 0.50}
     sector_map = {"HIGH_BETA_1.NS": "Cyclical", "HIGH_BETA_2.NS": "Tech"}
-    asset_betas = {"HIGH_BETA_1.NS": 1.5, "HIGH_BETA_2.NS": 1.6}  # Weighted beta = 1.55
+    asset_betas = {"HIGH_BETA_1.NS": 1.5, "HIGH_BETA_2.NS": 1.6}  # Weighted beta exposure = 1.55
+
 
     result = validate_portfolio_risk(
         weights=weights,
