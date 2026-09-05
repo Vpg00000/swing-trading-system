@@ -1,4 +1,5 @@
 import os
+import json
 from typing import Dict, Optional
 from pydantic import BaseModel, ValidationError
 from engine.priced_in import priced_in_analysis
@@ -83,4 +84,97 @@ def get_ai_research_output(symbol: str, event_id: Optional[str] = None) -> Dict:
         },
         "comparable_event_context": {},
         "suggested_comparable_event_ids": ["event1", "event2"]
+    }
+
+
+def query_local_ollama_fallback(
+    prompt: str,
+    model: str = "qwen2.5-coder:7b",
+    host: str = "http://localhost:11434"
+) -> Dict:
+    """TASK-061: Local Ollama Qwen2.5 / DeepSeek-R1 Offline Failover Router."""
+    import urllib.request
+    import urllib.error
+
+    url = f"{host}/api/generate"
+    payload = json.dumps({"model": model, "prompt": prompt, "stream": False}).encode("utf-8")
+    req = urllib.request.Request(url, data=payload, headers={"Content-Type": "application/json"})
+
+    try:
+        with urllib.request.urlopen(req, timeout=3.0) as resp:
+            data = json.loads(resp.read().decode("utf-8"))
+            return {
+                "status": "SUCCESS",
+                "provider": "OLLAMA_LOCAL",
+                "model": model,
+                "response": data.get("response", ""),
+                "is_fallback": True
+            }
+    except Exception as exc:
+        return {
+            "status": "DEGRADED",
+            "provider": "OLLAMA_LOCAL",
+            "model": model,
+            "response": f"[MOCK LOCAL INFERENCE FALLBACK] Analyzed prompt for {prompt[:30]}...",
+            "error": str(exc),
+            "is_fallback": True
+        }
+
+
+def extract_concall_guidance(transcript_text: str) -> Dict:
+    """TASK-062: Earnings Call & Concall Transcript Guidance Extractor."""
+    text_lower = transcript_text.lower()
+    positive_words = ["growth", "expansion", "strong", "higher", "target", "capex", "robust"]
+    negative_words = ["slowdown", "weakness", "headwind", "margin pressure", "decline", "delay"]
+
+    pos_count = sum(1 for w in positive_words if w in text_lower)
+    neg_count = sum(1 for w in negative_words if w in text_lower)
+
+    total = pos_count + neg_count
+    sentiment_score = round((pos_count - neg_count) / total, 2) if total > 0 else 0.0
+    stance = "BULLISH_GUIDANCE" if sentiment_score >= 0.20 else ("BEARISH_GUIDANCE" if sentiment_score <= -0.20 else "NEUTRAL")
+
+    return {
+        "transcript_length_chars": len(transcript_text),
+        "guidance_stance": stance,
+        "sentiment_score": sentiment_score,
+        "key_positives_count": pos_count,
+        "key_negatives_count": neg_count,
+        "capex_mentioned": "capex" in text_lower or "investment" in text_lower,
+        "status": "PROCESSED"
+    }
+
+
+def resolve_multi_agent_consensus(
+    model_predictions: Dict[str, Dict]
+) -> Dict:
+    """TASK-064: Multi-Model Voting & Contradiction Resolution Engine."""
+    if not model_predictions:
+        return {"consensus_signal": "NEUTRAL", "consensus_score": 0.0, "is_unanimous": False, "contradictions": ["No model inputs provided"]}
+
+    signals = [data.get("signal", "NEUTRAL").upper() for data in model_predictions.values()]
+    scores = [data.get("score", 50.0) for data in model_predictions.values()]
+
+    bullish_votes = sum(1 for s in signals if "BUY" in s)
+    bearish_votes = sum(1 for s in signals if "SELL" in s or "BEAR" in s or "AVOID" in s)
+
+    total_models = len(model_predictions)
+    is_unanimous = len(set(signals)) == 1
+    avg_score = round(float(sum(scores) / total_models), 2)
+
+    contradictions = []
+    if bullish_votes > 0 and bearish_votes > 0:
+        contradictions.append(f"Contradiction detected: {bullish_votes} Bullish vs {bearish_votes} Bearish votes")
+
+    consensus_signal = "BUY" if bullish_votes > bearish_votes else ("AVOID" if bearish_votes > bullish_votes else "NEUTRAL")
+
+    return {
+        "total_models": total_models,
+        "consensus_signal": consensus_signal,
+        "consensus_score": avg_score,
+        "is_unanimous": is_unanimous,
+        "bullish_votes": bullish_votes,
+        "bearish_votes": bearish_votes,
+        "contradictions": contradictions,
+        "model_signals": {model: data.get("signal") for model, data in model_predictions.items()}
     }

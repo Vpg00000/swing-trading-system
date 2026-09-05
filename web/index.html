@@ -2,11 +2,18 @@
 <html lang="en">
 <head>
     <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <meta name="theme-color" content="#10b981">
+    <meta name="apple-mobile-web-app-capable" content="yes">
+    <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+    <meta name="apple-mobile-web-app-title" content="SwingTrader">
     <title>Swing Trading System - AI Command Center</title>
+    <link rel="manifest" href="/manifest.json">
     <link rel="stylesheet" href="/static/style.css">
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.0/css/all.min.css">
     <link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@300;400;500;600;700&family=Space+Grotesk:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+    <!-- TradingView Lightweight Charts JS CDN -->
+    <script src="https://unpkg.com/lightweight-charts/dist/lightweight-charts.standalone.production.js"></script>
 </head>
 <body>
 
@@ -20,9 +27,14 @@
             <span>NIFTY <span class="text-mint font-bold" id="niftyVal">--</span></span>
             <span>VIX <span class="text-amber font-bold" id="vixVal">--</span></span>
         </div>
-        <button class="refresh-btn" id="refreshBtn" title="Re-run backend calculations">
-            <i class="fa-solid fa-arrows-rotate"></i> RE-RUN PIPELINE
-        </button>
+        <div style="display: flex; gap: 8px; align-items: center;">
+            <button class="audio-btn" id="audioToggleBtn" title="Toggle Sound Alerts" style="background: rgba(255,255,255,0.05); border: 1px solid var(--border-color); color: var(--color-mint); padding: 0.4rem 0.8rem; border-radius: 6px; cursor: pointer; font-size: 0.85rem; font-weight: 600;">
+                <i class="fa-solid fa-volume-high"></i> <span id="audioStatusText">AUDIO ON</span>
+            </button>
+            <button class="refresh-btn" id="refreshBtn" title="Re-run backend calculations">
+                <i class="fa-solid fa-arrows-rotate"></i> RE-RUN PIPELINE
+            </button>
+        </div>
     </header>
 
     <!-- Main Container -->
@@ -32,6 +44,9 @@
         <nav class="sidebar">
             <button class="nav-btn active" data-tab="overview">
                 <i class="fa-solid fa-gauge-high"></i> Overview
+            </button>
+            <button class="nav-btn" data-tab="chart">
+                <i class="fa-solid fa-chart-line"></i> Technical Chart
             </button>
             <button class="nav-btn" data-tab="screener">
                 <i class="fa-solid fa-filter"></i> Stock Screener Grid
@@ -44,6 +59,9 @@
             </button>
             <button class="nav-btn" data-tab="allocation">
                 <i class="fa-solid fa-chart-pie"></i> Portfolio & Risk UI
+            </button>
+            <button class="nav-btn" data-tab="notifications">
+                <i class="fa-solid fa-bell"></i> Alerts & Notifier
             </button>
             <button class="nav-btn" data-tab="insights">
                 <i class="fa-solid fa-chart-line"></i> Market Insights
@@ -59,16 +77,17 @@
             </button>
         </nav>
 
+
         <!-- Main Content Area -->
         <main class="content-view">
 
             <!-- 1. OVERVIEW TAB -->
             <div id="overview" class="tab-pane active">
-                <div class="overview-grid">
+                <div class="overview-grid" id="overviewGrid">
 
                     <!-- Regime Gauge Card -->
-                    <div class="card regime-card">
-                        <div class="card-header">Market Regime Score</div>
+                    <div class="card regime-card" id="regime-widget" draggable="true">
+                        <div class="card-header"><i class="fa-solid fa-grip-vertical" style="cursor: move; margin-right: 6px; color: var(--color-muted);"></i> Market Regime Score</div>
                         <div class="gauge-container">
                             <svg class="gauge" viewBox="0 0 100 50">
                                 <path class="gauge-bg" d="M 10 50 A 40 40 0 0 1 90 50"></path>
@@ -81,8 +100,8 @@
                     </div>
 
                     <!-- Capital Summary Card -->
-                    <div class="card">
-                        <div class="card-header">Capital Summary</div>
+                    <div class="card" id="capital-widget" draggable="true">
+                        <div class="card-header"><i class="fa-solid fa-grip-vertical" style="cursor: move; margin-right: 6px; color: var(--color-muted);"></i> Capital Summary</div>
                         <div class="capital-stats">
                             <div class="stat-row">
                                 <span class="stat-label">Total Capital</span>
@@ -104,8 +123,8 @@
                     </div>
 
                     <!-- Multi-factor Subscores Card -->
-                    <div class="card subscores-card">
-                        <div class="card-header">Multi-Factor Regime Details</div>
+                    <div class="card subscores-card" id="risk-widget" draggable="true">
+                        <div class="card-header"><i class="fa-solid fa-grip-vertical" style="cursor: move; margin-right: 6px; color: var(--color-muted);"></i> Multi-Factor Regime Details</div>
                         <div class="meter-list" id="regimeSubscores">
                             <!-- Populated dynamically -->
                         </div>
@@ -113,6 +132,103 @@
 
                 </div>
             </div>
+
+            <!-- TECHNICAL CHART TAB (TASK-071 & TASK-075) -->
+            <div id="chart" class="tab-pane">
+                <div class="card">
+                    <div class="card-header" style="display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 10px;">
+                        <span><i class="fa-solid fa-chart-candlestick text-mint"></i> Interactive TradingView Lightweight Canvas Chart</span>
+                        <div style="display: flex; gap: 10px; align-items: center; flex-wrap: wrap;">
+                            <input type="text" id="chartSymbolInput" value="RELIANCE.NS" style="background: rgba(0,0,0,0.3); border: 1px solid var(--border-color); color: #fff; padding: 4px 10px; border-radius: 4px; font-family: var(--font-mono); width: 140px;" placeholder="Symbol">
+                            <select id="chartTimeframeSelect" style="background: rgba(0,0,0,0.3); border: 1px solid var(--border-color); color: #fff; padding: 4px 10px; border-radius: 4px; font-family: var(--font-mono);">
+                                <option value="1D">Daily (1D)</option>
+                                <option value="1W">Weekly (1W)</option>
+                                <option value="1H">Hourly (1H)</option>
+                            </select>
+                            <button id="loadChartBtn" class="copy-btn"><i class="fa-solid fa-rotate-right"></i> LOAD CHART</button>
+                        </div>
+                    </div>
+
+                    <!-- Audio sound test toolbar (TASK-075) -->
+                    <div style="display: flex; gap: 8px; margin-bottom: 12px; background: rgba(255,255,255,0.02); padding: 8px 12px; border-radius: 6px; border: 1px solid var(--border-color); align-items: center; flex-wrap: wrap;">
+                        <span style="font-size: 0.8rem; color: var(--color-muted);"><i class="fa-solid fa-music text-mint"></i> Audio Synthesizer:</span>
+                        <button id="testChimeBtn" class="copy-btn" style="font-size: 0.75rem;"><i class="fa-solid fa-bell"></i> Order Fill Chime</button>
+                        <button id="testStopLossBtn" class="copy-btn" style="font-size: 0.75rem; border-color: var(--color-red); color: var(--color-red);"><i class="fa-solid fa-triangle-exclamation"></i> Stop Loss Tone</button>
+                        <button id="testPingBtn" class="copy-btn" style="font-size: 0.75rem; border-color: var(--color-amber); color: var(--color-amber);"><i class="fa-solid fa-bolt"></i> Opportunity Ping</button>
+                        <button id="testVoiceBtn" class="copy-btn" style="font-size: 0.75rem; border-color: var(--color-blue); color: var(--color-blue);"><i class="fa-solid fa-bullhorn"></i> Voice Alert</button>
+                    </div>
+
+                    <div id="tradingview-chart-container" style="width: 100%; height: 500px; background: #0b0f19; border: 1px solid var(--border-color); border-radius: 12px; overflow: hidden; position: relative;">
+                        <!-- Canvas / TradingView Chart mounts here -->
+                    </div>
+                </div>
+            </div>
+
+            <!-- NOTIFICATION & ALERT BOT TAB (TASK-072) -->
+            <div id="notifications" class="tab-pane">
+                <div class="card">
+                    <div class="card-header"><i class="fa-solid fa-paper-plane text-mint"></i> Telegram & WhatsApp Alert Bot Dispatcher</div>
+                    <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(300px, 1fr)); gap: 20px; padding: 15px 0;">
+                        <!-- Config Form -->
+                        <div style="background: rgba(255,255,255,0.02); border: 1px solid var(--border-color); padding: 15px; border-radius: 8px;">
+                            <h3 style="margin-bottom: 12px; font-size: 1rem;"><i class="fa-brands fa-telegram text-blue"></i> Telegram & WhatsApp API Settings</h3>
+                            <div style="display: flex; flex-direction: column; gap: 10px; font-size: 0.85rem;">
+                                <label><input type="checkbox" id="notifTelegramEnabled" checked> Enable Telegram Bot</label>
+                                <input type="text" id="notifTelegramToken" placeholder="Telegram Bot Token" style="background: rgba(0,0,0,0.3); border: 1px solid var(--border-color); color: #fff; padding: 6px 10px; border-radius: 4px;">
+                                <input type="text" id="notifTelegramChatId" placeholder="Telegram Chat ID" style="background: rgba(0,0,0,0.3); border: 1px solid var(--border-color); color: #fff; padding: 6px 10px; border-radius: 4px;">
+
+                                <label style="margin-top: 10px;"><input type="checkbox" id="notifWhatsappEnabled" checked> Enable WhatsApp (Twilio)</label>
+                                <input type="text" id="notifTwilioSid" placeholder="Twilio Account SID" style="background: rgba(0,0,0,0.3); border: 1px solid var(--border-color); color: #fff; padding: 6px 10px; border-radius: 4px;">
+                                <input type="password" id="notifTwilioAuthToken" placeholder="Twilio Auth Token" style="background: rgba(0,0,0,0.3); border: 1px solid var(--border-color); color: #fff; padding: 6px 10px; border-radius: 4px;">
+                                <input type="text" id="notifTwilioTo" placeholder="WhatsApp Destination Number (+91...)" style="background: rgba(0,0,0,0.3); border: 1px solid var(--border-color); color: #fff; padding: 6px 10px; border-radius: 4px;">
+                                
+                                <button id="saveNotifConfigBtn" class="copy-btn" style="margin-top: 10px;"><i class="fa-solid fa-floppy-disk"></i> SAVE CONFIG</button>
+                            </div>
+                        </div>
+
+                        <!-- Test Dispatcher -->
+                        <div style="background: rgba(255,255,255,0.02); border: 1px solid var(--border-color); padding: 15px; border-radius: 8px;">
+                            <h3 style="margin-bottom: 12px; font-size: 1rem;"><i class="fa-solid fa-paper-plane text-mint"></i> Test Instant Alert Dispatcher</h3>
+                            <div style="display: flex; flex-direction: column; gap: 10px; font-size: 0.85rem;">
+                                <select id="notifAlertCategory" style="background: rgba(0,0,0,0.3); border: 1px solid var(--border-color); color: #fff; padding: 6px 10px; border-radius: 4px;">
+                                    <option value="OPPORTUNITY">⚡ Opportunity Setup</option>
+                                    <option value="ORDER_FILL">📈 Trade Execution / Fill</option>
+                                    <option value="STOP_LOSS">🚨 Stop Loss Hit / Risk</option>
+                                    <option value="DRAWDOWN">📉 Drawdown Warning</option>
+                                </select>
+                                <input type="text" id="notifSymbol" value="RELIANCE.NS" placeholder="Stock Symbol" style="background: rgba(0,0,0,0.3); border: 1px solid var(--border-color); color: #fff; padding: 6px 10px; border-radius: 4px;">
+                                <input type="number" id="notifPrice" value="2885.50" placeholder="Trigger Price" style="background: rgba(0,0,0,0.3); border: 1px solid var(--border-color); color: #fff; padding: 6px 10px; border-radius: 4px;">
+                                <textarea id="notifCustomMessage" placeholder="Alert custom note/message" style="background: rgba(0,0,0,0.3); border: 1px solid var(--border-color); color: #fff; padding: 6px 10px; border-radius: 4px; height: 60px;"></textarea>
+
+                                <button id="sendTestNotifBtn" class="copy-btn"><i class="fa-solid fa-paper-plane"></i> DISPATCH INSTANT ALERT</button>
+                                <div id="notifDispatchStatus" style="font-size: 0.8rem; color: var(--color-mint); min-height: 20px;"></div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Dispatch Log History Card -->
+                <div class="card margin-top">
+                    <div class="card-header"><i class="fa-solid fa-clock-rotate-left text-mint"></i> Notification Dispatch Log History</div>
+                    <div class="table-container" style="overflow-x: auto; margin-top: 10px;">
+                        <table class="data-table">
+                            <thead>
+                                <tr>
+                                    <th>Timestamp</th>
+                                    <th>Channel</th>
+                                    <th>Alert Type</th>
+                                    <th>Status</th>
+                                    <th>Details / Payload</th>
+                                </tr>
+                            </thead>
+                            <tbody id="notifLogsTableBody">
+                                <tr><td colspan="5" style="text-align: center; color: #888; padding: 20px;">No notification logs recorded yet.</td></tr>
+                            </tbody>
+                        </table>
+                    </div>
+                </div>
+            </div>
+
 
             <!-- 2. STOCK SCREENER & PRO DATA GRID TAB -->
             <div id="screener" class="tab-pane">

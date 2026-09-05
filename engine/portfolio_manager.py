@@ -132,7 +132,47 @@ def generate_portfolio_snapshot(portfolio_state=None):
         portfolio_state.get('cash', 0.0)
     )
 
-# Example usage
+def aggregate_multi_account_portfolios(account_states: list[dict]) -> dict:
+    """TASK-059: Multi-Broker Family Demat Account Portfolio Aggregator."""
+    combined_holdings = {}
+    total_cash = 0.0
+    total_value = 0.0
+
+    for acc in account_states:
+        acc_name = acc.get("account_name", acc.get("broker", "PRIMARY_ACCOUNT"))
+        cash = acc.get("cash", acc.get("cash_inr", 0.0))
+        total_cash += cash
+
+        for h in acc.get("holdings", []):
+            sym = h.get("symbol", "UNKNOWN")
+            qty = h.get("quantity", 0)
+            price = h.get("price", h.get("current_price", 0.0))
+            val = qty * price
+            total_value += val
+
+            if sym not in combined_holdings:
+                combined_holdings[sym] = {
+                    "symbol": sym,
+                    "quantity": 0,
+                    "total_value_inr": 0.0,
+                    "current_price": price,
+                    "accounts": []
+                }
+            combined_holdings[sym]["quantity"] += qty
+            combined_holdings[sym]["total_value_inr"] += val
+            combined_holdings[sym]["accounts"].append({"account": acc_name, "quantity": qty})
+
+    total_portfolio_nav = total_cash + total_value
+
+    return {
+        "account_count": len(account_states),
+        "total_cash_inr": round(total_cash, 2),
+        "total_holdings_value_inr": round(total_value, 2),
+        "total_portfolio_nav_inr": round(total_portfolio_nav, 2),
+        "unique_symbols_count": len(combined_holdings),
+        "holdings": list(combined_holdings.values())
+    }
+
 if __name__ == "__main__":
     portfolio_state = fetch_and_store_portfolio_state()
     print(portfolio_state)

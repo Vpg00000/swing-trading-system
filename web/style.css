@@ -749,3 +749,74 @@ body {
     0% { background-position: 200% 0; }
     100% { background-position: -200% 0; }
 }
+
+/* ── Mobile Responsive Rules (PWA / Touch Optimized) ── */
+@media (max-width: 1024px) {
+    .overview-grid, .allocation-grid {
+        grid-template-columns: repeat(auto-fit, minmax(280px, 1fr)) !important;
+    }
+    .prompts-layout {
+        grid-template-columns: 1fr !important;
+        height: auto !important;
+    }
+}
+
+@media (max-width: 768px) {
+    .header {
+        flex-wrap: wrap !important;
+        padding: 0.8rem 1rem !important;
+        gap: 0.5rem !important;
+    }
+    .header-brand {
+        font-size: 1.1rem !important;
+    }
+    .main-layout {
+        flex-direction: column !important;
+    }
+    .sidebar {
+        width: 100% !important;
+        display: flex !important;
+        flex-direction: row !important;
+        overflow-x: auto !important;
+        padding: 0.5rem !important;
+        border-right: none !important;
+        border-bottom: 1px solid var(--border-color) !important;
+        white-space: nowrap !important;
+    }
+    .nav-btn {
+        padding: 0.5rem 0.8rem !important;
+        font-size: 0.8rem !important;
+        min-height: 44px !important; /* Touch target minimum */
+    }
+    .content-view {
+        padding: 1rem 0.5rem !important;
+    }
+    .candidate-summary {
+        flex-direction: column !important;
+        align-items: flex-start !important;
+        gap: 0.8rem !important;
+    }
+    .c-right {
+        width: 100% !important;
+        justify-content: space-between !important;
+    }
+    .details-grid {
+        grid-template-columns: 1fr !important;
+    }
+}
+
+@media (max-width: 480px) {
+    .header-market {
+        display: none !important;
+    }
+    .card {
+        padding: 1rem !important;
+    }
+    .refresh-btn, .audio-btn, .copy-btn {
+        min-height: 44px !important;
+    }
+    .table-container {
+        font-size: 0.75rem !important;
+    }
+}
+

@@ -91,6 +91,45 @@ def calculate_scale_out_targets(entry_price: float, stop_loss: float, side: str 
     return {"tp1_50pct": tp1, "tp2_50pct": tp2, "risk_per_share": round(risk, 2)}
 
 
+def classify_trade_post_mortem_mistakes(completed_trades: List[Dict[str, Any]]) -> Dict[str, Any]:
+    """TASK-063: Weekly AI Trade Post-Mortem & Mistake Pattern Classifier."""
+    mistake_counts = {
+        "FOMO_EARLY_ENTRY": 0,
+        "CHASING_EXTENDED_MOVE": 0,
+        "TOO_TIGHT_STOP_LOSS": 0,
+        "EARLY_PROFIT_EXIT": 0,
+        "OVERSIZED_POSITION": 0,
+        "NO_MISTAKE_CLEAN_EXECUTION": 0
+    }
+
+    for t in completed_trades:
+        entry = t.get("entry_price", t.get("execution_price", 0.0))
+        exit_p = t.get("exit_price", entry)
+        stop = t.get("stop_loss", 0.0)
+        pnl = t.get("realized_pnl", exit_p - entry)
+        holding_days = t.get("holding_days", 1)
+
+        if pnl < 0:
+            if abs(entry - stop) / entry < 0.01:
+                mistake_counts["TOO_TIGHT_STOP_LOSS"] += 1
+            elif t.get("price_chased_pct", 0.0) > 3.0:
+                mistake_counts["CHASING_EXTENDED_MOVE"] += 1
+            else:
+                mistake_counts["FOMO_EARLY_ENTRY"] += 1
+        elif pnl > 0 and holding_days == 1:
+            mistake_counts["EARLY_PROFIT_EXIT"] += 1
+        else:
+            mistake_counts["NO_MISTAKE_CLEAN_EXECUTION"] += 1
+
+    total_reviewed = len(completed_trades)
+    return {
+        "total_trades_reviewed": total_reviewed,
+        "mistake_breakdown": mistake_counts,
+        "top_mistake": max(mistake_counts, key=mistake_counts.get) if total_reviewed > 0 else "NONE",
+        "status": "CLASSIFIED"
+    }
+
+
 if __name__ == "__main__":
     print("Testing Trade Journal Module...\n")
     tr = log_executed_trade("RELIANCE.NS", "BUY", 10, 2850.0, 2854.5, 2720.0)

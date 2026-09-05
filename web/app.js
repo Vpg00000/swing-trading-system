@@ -32,11 +32,18 @@ document.addEventListener('DOMContentLoaded', () => {
     const vixVal = document.getElementById('vixVal');
 
     // ── Tab Navigation & Asynchronous Lazy Loader ──
-    const loadedTabs = { screener: false, overview: false, candidates: false, research: false, allocation: false, insights: false, prompts: false, raw: false, health: false };
+    const loadedTabs = { screener: false, overview: false, candidates: false, research: false, allocation: false, insights: false, prompts: false, raw: false, health: false, chart: false, notifications: false };
 
     function triggerTabLazyLoad(tabId) {
         if (tabId === 'screener') {
             loadScreenerGrid();
+        } else if (tabId === 'chart') {
+            const sym = document.getElementById('chartSymbolInput')?.value || 'RELIANCE.NS';
+            const tf = document.getElementById('chartTimeframeSelect')?.value || '1D';
+            loadChartData(sym, tf);
+        } else if (tabId === 'notifications') {
+            loadNotificationConfig();
+            loadNotificationLogs();
         } else if (tabId === 'candidates') {
             loadOpportunities();
         } else if (tabId === 'research') {
@@ -61,6 +68,7 @@ document.addEventListener('DOMContentLoaded', () => {
             loadRawReport();
         }
     }
+
 
     navButtons.forEach(btn => {
         btn.addEventListener('click', () => {
@@ -955,6 +963,530 @@ document.addEventListener('DOMContentLoaded', () => {
             initDashboard(true);
         });
     }
+
+    // ── TASK-075: Web Audio API Sound Alert Synthesizer ──
+    class SoundSynthesizer {
+        constructor() {
+            this.ctx = null;
+            this.muted = false;
+            this.initAudioConfig();
+        }
+
+        async initAudioConfig() {
+            try {
+                const res = await fetch('/api/ui/audio-config');
+                if (res.ok) {
+                    const config = await res.json();
+                    this.muted = !!config.muted;
+                    this.updateUI();
+                }
+            } catch (e) {
+                console.warn('Audio config fetch error:', e);
+            }
+        }
+
+        getAudioContext() {
+            if (!this.ctx) {
+                const AudioCtx = window.AudioContext || window.webkitAudioContext;
+                if (AudioCtx) this.ctx = new AudioCtx();
+            }
+            if (this.ctx && this.ctx.state === 'suspended') {
+                this.ctx.resume();
+            }
+            return this.ctx;
+        }
+
+        toggleMute() {
+            this.muted = !this.muted;
+            this.saveConfig();
+            this.updateUI();
+            return this.muted;
+        }
+
+        async saveConfig() {
+            try {
+                await fetch('/api/ui/audio-config', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ muted: this.muted, volume: 0.8, chimes_enabled: true, voice_enabled: true })
+                });
+            } catch (e) {
+                console.warn('Failed to save audio config:', e);
+            }
+        }
+
+        updateUI() {
+            const btn = document.getElementById('audioToggleBtn');
+            const txt = document.getElementById('audioStatusText');
+            if (btn && txt) {
+                if (this.muted) {
+                    btn.style.color = '#ff4757';
+                    txt.textContent = 'AUDIO OFF';
+                } else {
+                    btn.style.color = '#10b981';
+                    txt.textContent = 'AUDIO ON';
+                }
+            }
+        }
+
+        playOrderFillChime() {
+            if (this.muted) return;
+            const ctx = this.getAudioContext();
+            if (!ctx) return;
+
+            const now = ctx.currentTime;
+            const notes = [523.25, 659.25, 783.99]; // C5, E5, G5
+            notes.forEach((freq, idx) => {
+                const osc = ctx.createOscillator();
+                const gain = ctx.createGain();
+                osc.type = 'sine';
+                osc.frequency.setValueAtTime(freq, now + idx * 0.1);
+                gain.gain.setValueAtTime(0.3, now + idx * 0.1);
+                gain.gain.exponentialRampToValueAtTime(0.001, now + idx * 0.1 + 0.3);
+                osc.connect(gain);
+                gain.connect(ctx.destination);
+                osc.start(now + idx * 0.1);
+                osc.stop(now + idx * 0.1 + 0.3);
+            });
+        }
+
+        playStopLossTone() {
+            if (this.muted) return;
+            const ctx = this.getAudioContext();
+            if (!ctx) return;
+
+            const now = ctx.currentTime;
+            [220, 180].forEach((freq, idx) => {
+                const osc = ctx.createOscillator();
+                const gain = ctx.createGain();
+                osc.type = 'sawtooth';
+                osc.frequency.setValueAtTime(freq, now + idx * 0.15);
+                gain.gain.setValueAtTime(0.4, now + idx * 0.15);
+                gain.gain.exponentialRampToValueAtTime(0.001, now + idx * 0.15 + 0.25);
+                osc.connect(gain);
+                gain.connect(ctx.destination);
+                osc.start(now + idx * 0.15);
+                osc.stop(now + idx * 0.15 + 0.25);
+            });
+        }
+
+        playOpportunityPing() {
+            if (this.muted) return;
+            const ctx = this.getAudioContext();
+            if (!ctx) return;
+
+            const now = ctx.currentTime;
+            const osc = ctx.createOscillator();
+            const gain = ctx.createGain();
+            osc.type = 'sine';
+            osc.frequency.setValueAtTime(880, now);
+            gain.gain.setValueAtTime(0.4, now);
+            gain.gain.exponentialRampToValueAtTime(0.001, now + 0.4);
+            osc.connect(gain);
+            gain.connect(ctx.destination);
+            osc.start(now);
+            osc.stop(now + 0.4);
+        }
+
+        speakAlert(text) {
+            if (this.muted) return;
+            if ('speechSynthesis' in window) {
+                const utterance = new SpeechSynthesisUtterance(text);
+                utterance.rate = 1.0;
+                utterance.pitch = 1.0;
+                window.speechSynthesis.speak(utterance);
+            }
+        }
+    }
+
+    const audioSynth = new SoundSynthesizer();
+
+    const audioToggleBtn = document.getElementById('audioToggleBtn');
+    if (audioToggleBtn) {
+        audioToggleBtn.addEventListener('click', () => {
+            audioSynth.toggleMute();
+        });
+    }
+
+    document.getElementById('testChimeBtn')?.addEventListener('click', () => audioSynth.playOrderFillChime());
+    document.getElementById('testStopLossBtn')?.addEventListener('click', () => audioSynth.playStopLossTone());
+    document.getElementById('testPingBtn')?.addEventListener('click', () => audioSynth.playOpportunityPing());
+    document.getElementById('testVoiceBtn')?.addEventListener('click', () => audioSynth.speakAlert('Opportunity detected for Reliance Industries'));
+
+
+    // ── TASK-071: TradingView Lightweight Charts & Canvas Fallback ──
+    let lightweightChartInstance = null;
+
+    async function loadChartData(symbol = 'RELIANCE.NS', timeframe = '1D') {
+        const container = document.getElementById('tradingview-chart-container');
+        if (!container) return;
+
+        try {
+            const res = await fetch(`/api/chart/data?symbol=${encodeURIComponent(symbol)}&timeframe=${timeframe}`);
+            if (!res.ok) throw new Error('Chart API error');
+            const data = await res.json();
+
+            container.innerHTML = '';
+
+            if (window.LightweightCharts) {
+                lightweightChartInstance = window.LightweightCharts.createChart(container, {
+                    width: container.clientWidth || 800,
+                    height: 500,
+                    layout: {
+                        backgroundColor: '#0b0f19',
+                        textColor: '#a6b2c9'
+                    },
+                    grid: {
+                        vertLines: { color: 'rgba(255,255,255,0.05)' },
+                        horzLines: { color: 'rgba(255,255,255,0.05)' }
+                    },
+                    crosshair: { mode: window.LightweightCharts.CrosshairMode.Normal },
+                    rightPriceScale: { borderColor: 'rgba(255,255,255,0.1)' },
+                    timeScale: { borderColor: 'rgba(255,255,255,0.1)' }
+                });
+
+                const candleSeries = lightweightChartInstance.addCandlestickSeries({
+                    upColor: '#10b981',
+                    downColor: '#ef4444',
+                    borderUpColor: '#10b981',
+                    borderDownColor: '#ef4444',
+                    wickUpColor: '#10b981',
+                    wickDownColor: '#ef4444'
+                });
+                candleSeries.setData(data.candles);
+
+                const ema20Series = lightweightChartInstance.addLineSeries({ color: '#3b82f6', lineWidth: 2, title: 'EMA 20' });
+                ema20Series.setData(data.ema20);
+
+                const ema50Series = lightweightChartInstance.addLineSeries({ color: '#ff9f43', lineWidth: 2, title: 'EMA 50' });
+                ema50Series.setData(data.ema50);
+
+                if (data.markers && data.markers.length > 0) {
+                    candleSeries.setMarkers(data.markers);
+                }
+
+                window.addEventListener('resize', () => {
+                    if (lightweightChartInstance && container) {
+                        lightweightChartInstance.applyOptions({ width: container.clientWidth });
+                    }
+                });
+            } else {
+                renderCanvasChartFallback(container, data);
+            }
+        } catch (err) {
+            console.error('Failed to load chart:', err);
+            container.innerHTML = `<div style="padding: 20px; color: #ff4757;">Failed to render chart: ${err.message}</div>`;
+        }
+    }
+
+    function renderCanvasChartFallback(container, data) {
+        const canvas = document.createElement('canvas');
+        canvas.width = container.clientWidth || 800;
+        canvas.height = 500;
+        container.appendChild(canvas);
+
+        const ctx = canvas.getContext('2d');
+        ctx.fillStyle = '#0b0f19';
+        ctx.fillRect(0, 0, canvas.width, canvas.height);
+
+        ctx.fillStyle = '#10b981';
+        ctx.font = '16px monospace';
+        ctx.fillText(`${data.symbol} (${data.timeframe}) — HTML5 Canvas Engine`, 20, 30);
+
+        const candles = data.candles || [];
+        if (candles.length === 0) return;
+
+        let minP = Math.min(...candles.map(c => c.low));
+        let maxP = Math.max(...candles.map(c => c.high));
+        const range = maxP - minP || 1;
+
+        const padL = 50, padR = 20, padT = 50, padB = 40;
+        const chartW = canvas.width - padL - padR;
+        const chartH = canvas.height - padT - padB;
+        const barW = chartW / candles.length;
+
+        ctx.strokeStyle = 'rgba(255,255,255,0.05)';
+        ctx.lineWidth = 1;
+        for (let i = 0; i < 5; i++) {
+            const y = padT + (chartH / 4) * i;
+            ctx.beginPath();
+            ctx.moveTo(padL, y);
+            ctx.lineTo(canvas.width - padR, y);
+            ctx.stroke();
+        }
+
+        candles.forEach((c, idx) => {
+            const x = padL + idx * barW + barW / 2;
+            const openY = padT + chartH * (1 - (c.open - minP) / range);
+            const closeY = padT + chartH * (1 - (c.close - minP) / range);
+            const highY = padT + chartH * (1 - (c.high - minP) / range);
+            const lowY = padT + chartH * (1 - (c.low - minP) / range);
+
+            const isGreen = c.close >= c.open;
+            ctx.strokeStyle = isGreen ? '#10b981' : '#ef4444';
+            ctx.fillStyle = isGreen ? '#10b981' : '#ef4444';
+
+            ctx.beginPath();
+            ctx.moveTo(x, highY);
+            ctx.lineTo(x, lowY);
+            ctx.stroke();
+
+            const topY = Math.min(openY, closeY);
+            const bH = Math.max(2, Math.abs(closeY - openY));
+            ctx.fillRect(x - barW * 0.35, topY, barW * 0.7, bH);
+        });
+
+        if (data.markers) {
+            data.markers.forEach(m => {
+                const idx = candles.findIndex(c => c.time === m.time);
+                if (idx !== -1) {
+                    const x = padL + idx * barW + barW / 2;
+                    const c = candles[idx];
+                    const y = m.position === 'belowBar'
+                        ? padT + chartH * (1 - (c.low - minP) / range) + 15
+                        : padT + chartH * (1 - (c.high - minP) / range) - 15;
+                    ctx.fillStyle = m.color || '#10b981';
+                    ctx.font = '12px monospace';
+                    ctx.fillText(m.text, x - 20, y);
+                }
+            });
+        }
+    }
+
+    document.getElementById('loadChartBtn')?.addEventListener('click', () => {
+        const sym = document.getElementById('chartSymbolInput')?.value || 'RELIANCE.NS';
+        const tf = document.getElementById('chartTimeframeSelect')?.value || '1D';
+        loadChartData(sym, tf);
+    });
+
+
+    // ── TASK-074: Drag-and-Drop Customizable Layout Handler ──
+    function initDragAndDropLayout() {
+        const grid = document.getElementById('overviewGrid');
+        if (!grid) return;
+
+        let draggedItem = null;
+
+        grid.querySelectorAll('.card[draggable="true"]').forEach(card => {
+            card.addEventListener('dragstart', (e) => {
+                draggedItem = card;
+                e.dataTransfer.effectAllowed = 'move';
+                card.style.opacity = '0.5';
+            });
+
+            card.addEventListener('dragend', () => {
+                draggedItem = null;
+                card.style.opacity = '1.0';
+                saveDashboardLayout();
+            });
+
+            card.addEventListener('dragover', (e) => {
+                e.preventDefault();
+                e.dataTransfer.dropEffect = 'move';
+            });
+
+            card.addEventListener('drop', (e) => {
+                e.preventDefault();
+                if (draggedItem && draggedItem !== card) {
+                    const allCards = Array.from(grid.querySelectorAll('.card'));
+                    const draggedIdx = allCards.indexOf(draggedItem);
+                    const targetIdx = allCards.indexOf(card);
+
+                    if (draggedIdx < targetIdx) {
+                        grid.insertBefore(draggedItem, card.nextSibling);
+                    } else {
+                        grid.insertBefore(draggedItem, card);
+                    }
+                    saveDashboardLayout();
+                }
+            });
+        });
+
+        loadSavedDashboardLayout();
+    }
+
+    async function saveDashboardLayout() {
+        const grid = document.getElementById('overviewGrid');
+        if (!grid) return;
+
+        const cards = Array.from(grid.querySelectorAll('.card'));
+        const layout = {
+            version: "1.0",
+            widgets: cards.map((c, idx) => ({
+                id: c.id,
+                title: c.querySelector('.card-header')?.innerText.trim() || c.id,
+                visible: true,
+                order: idx
+            }))
+        };
+
+        localStorage.setItem('dashboard_layout', JSON.stringify(layout));
+
+        try {
+            await fetch('/api/ui/layout-config', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify(layout)
+            });
+        } catch (e) {
+            console.warn('Failed to save layout to server:', e);
+        }
+    }
+
+    async function loadSavedDashboardLayout() {
+        try {
+            const res = await fetch('/api/ui/layout-config');
+            let layout = null;
+            if (res.ok) {
+                layout = await res.json();
+            } else {
+                const local = localStorage.getItem('dashboard_layout');
+                if (local) layout = JSON.parse(local);
+            }
+
+            if (layout && layout.widgets && layout.widgets.length > 0) {
+                const grid = document.getElementById('overviewGrid');
+                if (!grid) return;
+
+                layout.widgets.sort((a, b) => a.order - b.order).forEach(w => {
+                    const el = document.getElementById(w.id);
+                    if (el) grid.appendChild(el);
+                });
+            }
+        } catch (e) {
+            console.warn('Layout load error:', e);
+        }
+    }
+
+
+    // ── TASK-072: Telegram & WhatsApp Notifier Management ──
+    async function loadNotificationConfig() {
+        try {
+            const res = await fetch('/api/notifications/config');
+            if (!res.ok) return;
+            const config = await res.json();
+
+            if (document.getElementById('notifTelegramEnabled')) document.getElementById('notifTelegramEnabled').checked = !!config.telegram_enabled;
+            if (document.getElementById('notifWhatsappEnabled')) document.getElementById('notifWhatsappEnabled').checked = !!config.whatsapp_enabled;
+            if (document.getElementById('notifTelegramToken')) document.getElementById('notifTelegramToken').value = config.telegram_bot_token || '';
+            if (document.getElementById('notifTelegramChatId')) document.getElementById('notifTelegramChatId').value = config.telegram_chat_id || '';
+            if (document.getElementById('notifTwilioSid')) document.getElementById('notifTwilioSid').value = config.twilio_account_sid || '';
+            if (document.getElementById('notifTwilioTo')) document.getElementById('notifTwilioTo').value = config.twilio_whatsapp_to || '';
+        } catch (e) {
+            console.warn('Notification config load error:', e);
+        }
+    }
+
+    async function loadNotificationLogs() {
+        try {
+            const res = await fetch('/api/notifications/log');
+            if (!res.ok) return;
+            const logs = await res.json();
+            const tbody = document.getElementById('notifLogsTableBody');
+            if (!tbody) return;
+
+            if (logs.length === 0) {
+                tbody.innerHTML = '<tr><td colspan="5" style="text-align: center; color: #888; padding: 20px;">No notification logs recorded yet.</td></tr>';
+                return;
+            }
+
+            let html = '';
+            logs.forEach(l => {
+                const stColor = l.status === 'SUCCESS' ? '#10b981' : '#ff4757';
+                html += `
+                    <tr>
+                        <td class="font-mono text-xs">${l.timestamp ? new Date(l.timestamp).toLocaleTimeString() : '--'}</td>
+                        <td class="font-bold">${l.channel}</td>
+                        <td><span class="badge badge-ltcg">${l.alert_type}</span></td>
+                        <td style="color: ${stColor}; font-weight: 700;">${l.status}</td>
+                        <td class="font-mono text-xs" style="color: #a6b2c9;">${JSON.stringify(l.details)}</td>
+                    </tr>`;
+            });
+            tbody.innerHTML = html;
+        } catch (e) {
+            console.warn('Notification logs load error:', e);
+        }
+    }
+
+    document.getElementById('saveNotifConfigBtn')?.addEventListener('click', async () => {
+        const payload = {
+            telegram_enabled: document.getElementById('notifTelegramEnabled')?.checked,
+            whatsapp_enabled: document.getElementById('notifWhatsappEnabled')?.checked,
+            telegram_bot_token: document.getElementById('notifTelegramToken')?.value,
+            telegram_chat_id: document.getElementById('notifTelegramChatId')?.value,
+            twilio_account_sid: document.getElementById('notifTwilioSid')?.value,
+            twilio_auth_token: document.getElementById('notifTwilioAuthToken')?.value,
+            twilio_whatsapp_to: document.getElementById('notifTwilioTo')?.value
+        };
+        try {
+            const res = await fetch('/api/notifications/config', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify(payload)
+            });
+            const statusEl = document.getElementById('notifDispatchStatus');
+            if (res.ok) {
+                if (statusEl) statusEl.textContent = 'Configuration saved successfully!';
+            } else {
+                if (statusEl) statusEl.textContent = 'Failed to save configuration.';
+            }
+        } catch (e) {
+            console.error('Config save error:', e);
+        }
+    });
+
+    document.getElementById('sendTestNotifBtn')?.addEventListener('click', async () => {
+        const category = document.getElementById('notifAlertCategory')?.value || 'OPPORTUNITY';
+        const symbol = document.getElementById('notifSymbol')?.value || 'RELIANCE.NS';
+        const price = parseFloat(document.getElementById('notifPrice')?.value || '2885.50');
+        const message = document.getElementById('notifCustomMessage')?.value || 'Instant test alert triggered from AI Command Center';
+
+        const payload = {
+            alert_type: category,
+            data: {
+                title: `${category} Triggered`,
+                symbol: symbol,
+                price: price,
+                message: message
+            }
+        };
+
+        const statusEl = document.getElementById('notifDispatchStatus');
+        if (statusEl) statusEl.textContent = 'Dispatching alert...';
+
+        try {
+            const res = await fetch('/api/notifications/send', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify(payload)
+            });
+            const data = await res.json();
+            if (res.ok) {
+                if (statusEl) statusEl.textContent = `Alert dispatched via Telegram/WhatsApp! Status: ${data.status}`;
+                if (category === 'ORDER_FILL') audioSynth.playOrderFillChime();
+                else if (category === 'STOP_LOSS' || category === 'DRAWDOWN') audioSynth.playStopLossTone();
+                else audioSynth.playOpportunityPing();
+                loadNotificationLogs();
+            } else {
+                if (statusEl) statusEl.textContent = 'Dispatch failed.';
+            }
+        } catch (e) {
+            console.error('Dispatch error:', e);
+            if (statusEl) statusEl.textContent = 'Dispatch error: ' + e.message;
+        }
+    });
+
+    // PWA Service Worker Registration
+    if ('serviceWorker' in navigator) {
+        window.addEventListener('load', () => {
+            navigator.serviceWorker.register('/sw.js')
+                .then(reg => console.log('PWA ServiceWorker registered:', reg.scope))
+                .catch(err => console.warn('PWA ServiceWorker registration failed:', err));
+        });
+    }
+
+    // Initialize Drag & Drop Layout Customizer
+    initDragAndDropLayout();
 
     // ── Initialize App ─────────────────────────────
     initDashboard(false);
