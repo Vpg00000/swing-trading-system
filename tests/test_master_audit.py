@@ -5,6 +5,8 @@ for all core trading system components.
 
 import pytest
 from pathlib import Path
+import websockets
+import asyncio
 
 from engine import decision, indicators, macro_regime, fundamental, governance
 from data import database, sync_engine, dhan_auth, microstructure, fii_dii, institutional_flow
@@ -78,3 +80,30 @@ def test_master_audit_system_health():
 
     if 'status' in health_data:
         assert all(value in ['healthy', 'degraded', 'unhealthy'] for value in health_data['status'].values())
+
+async def test_master_audit_websocket_connection():
+    """Verify WebSocket connection and message handling."""
+    from web_server import app
+    import json
+
+    async with websockets.connect('ws://localhost:8000/ws') as websocket:
+        # Send a test message
+        test_message = json.dumps({"action": "test", "data": "test_data"})
+        await websocket.send(test_message)
+
+        # Receive the response
+        response = await websocket.recv()
+        response_data = json.loads(response)
+
+        # Verify the response
+        assert response_data["status"] == "success"
+        assert response_data["message"] == "Test message received"
+
+        # Verify the echo functionality
+        echo_message = json.dumps({"action": "echo", "data": "echo_data"})
+        await websocket.send(echo_message)
+        echo_response = await websocket.recv()
+        echo_response_data = json.loads(echo_response)
+
+        assert echo_response_data["status"] == "success"
+        assert echo_response_data["message"] == "echo_data"
