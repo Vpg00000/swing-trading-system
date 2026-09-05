@@ -153,3 +153,33 @@ def test_http_api_sorted_query_response_time(client):
     median = execution_times[len(execution_times) // 2]
     assert median < 200
     print(f"HTTP API sorted query response time - Median: {median:.2f} ms")
+
+def test_http_api_detail_page_query_response_time(client):
+    execution_times = []
+    for _ in range(20):
+        start_time = time.perf_counter()
+        res1 = client.get('/api/stocks/1')
+        res2 = client.get('/api/stocks/1/financials')
+        res3 = client.get('/api/stocks/1/news')
+        end_time = time.perf_counter()
+        execution_times.append((end_time - start_time) * 1000)  # Convert to milliseconds
+    execution_times.sort()
+    median = execution_times[len(execution_times) // 2]
+    assert median < 300
+    print(f"HTTP API detail page query response time - Median: {median:.2f} ms")
+
+def test_http_api_dashboard_load_response_time(client):
+    execution_times = []
+    for _ in range(20):
+        start_time = time.perf_counter()
+        res1 = client.get('/api/stocks?limit=10')
+        res2 = client.get('/api/stocks?sort=market_cap&order=desc&limit=5')
+        res3 = client.get('/api/stocks?sector=Technology&limit=5')
+        res4 = client.get('/api/stocks?sector=Healthcare&limit=5')
+        res5 = client.get('/api/stocks?sector=Financials&limit=5')
+        end_time = time.perf_counter()
+        execution_times.append((end_time - start_time) * 1000)  # Convert to milliseconds
+    execution_times.sort()
+    median = execution_times[len(execution_times) // 2]
+    assert median < 400
+    print(f"HTTP API dashboard load response time - Median: {median:.2f} ms")
