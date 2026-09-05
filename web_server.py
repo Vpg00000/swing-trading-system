@@ -9,6 +9,7 @@ import logging
 import datetime
 import time
 import json
+import dataclasses
 from typing import Optional, List, Dict, Any
 from pathlib import Path
 from fastapi import FastAPI, HTTPException, Query
@@ -21,7 +22,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 
 from engine.report import generate_report_data, build_report
 from engine.portfolio_manager import fetch_and_store_portfolio_state, reconcile_portfolio_state, generate_portfolio_snapshot
-from engine.priced_in import classify_priced_in
+from engine.priced_in import classify_priced_in_state
 try:
     from src.system_health import get_system_health_data
 except ImportError:
@@ -424,10 +425,40 @@ async def get_forensics(symbol: Optional[str] = Query(None)):
         raise HTTPException(status_code=500, detail=str(exc))
 
 @app.get("/api/priced-in")
-async def get_priced_in(symbol: str = Query(...)):
+async def get_priced_in(symbol: str = Query(...), date: Optional[str] = Query(None)):
     """Endpoint to fetch priced-in analysis for a stock symbol."""
     try:
-        priced_in_data = classify_priced_in(symbol)
+        from engine.ai_engine import get_ai_research_output
+        from engine.expected_return import get_expected_impact
+        from engine.valuation import get_valuation_metrics
+        from data.market import get_market_data
+        from data.events import get_comparable_events_data
+
+        # Get AI research output
+        ai_research_output = get_ai_research_output(symbol, date)
+
+        # Get expected impact
+        expected_impact = get_expected_impact(symbol, date)
+
+        # Get valuation metrics
+        valuation_metrics = get_valuation_metrics(symbol, date)
+
+        # Get market data
+        market_data = get_market_data(symbol, date)
+
+        # Get comparable events data
+        comparable_events_data = get_comparable_events_data(symbol, date)
+
+        # Classify priced-in state
+        priced_in_data = classify_priced_in_state(
+            symbol=symbol,
+            date=date,
+            price=market_data.get("price"),
+            expectations=expected_impact,
+            valuation=valuation_metrics,
+            comparable_events_data=comparable_events_data,
+            ai_research_output=ai_research_output
+        )
 
         if priced_in_data is None:
             return JSONResponse(
@@ -452,6 +483,7 @@ async def get_priced_in(symbol: str = Query(...)):
         # Structure output into evidence and inference sections
         result = {
             "symbol": symbol,
+            "date": date,
             "priced_in": {
                 "evidence": {
                     "price_delta": priced_in_data.get("price_delta"),

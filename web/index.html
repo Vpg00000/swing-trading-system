@@ -28,7 +28,7 @@
 
     <!-- Main Container -->
     <div class="main-layout">
-        
+
         <!-- Left Sidebar Navigation -->
         <nav class="sidebar">
             <button class="nav-btn" data-tab="overview">
@@ -59,11 +59,11 @@
 
         <!-- Main Content Area -->
         <main class="content-view">
-            
+
             <!-- OVERVIEW TAB -->
             <div id="overview" class="tab-pane">
                 <div class="overview-grid">
-                    
+
                     <!-- Regime Gauge Card -->
                     <div class="card regime-card">
                         <div class="card-header">Market Regime Score</div>
@@ -255,7 +255,7 @@
 
                         <!-- Live Search & Sync Button & Export Actions -->
                         <div style="display: flex; gap: 10px; align-items: center; flex-wrap: wrap;">
-                            <input type="text" id="gridSearchInput" placeholder="🔍 Search stock..." style="background: rgba(0,0,0,0.4); border: 1px solid rgba(255,255,255,0.15); color: #fff; padding: 6px 12px; border-radius: 4px; outline: none; font-size: 0.85rem; width: 160px;">
+                            <input type="text" id="gridSearchInput" aria-label="Search stock" data-hint="🔍 Search stock..." style="background: rgba(0,0,0,0.4); border: 1px solid rgba(255,255,255,0.15); color: #fff; padding: 6px 12px; border-radius: 4px; outline: none; font-size: 0.85rem; width: 160px;">
                             <button class="btn btn-sm" id="exportCsvBtn" style="background: rgba(255,255,255,0.1); color: #fff; border: 1px solid rgba(255,255,255,0.2); padding: 6px 10px; border-radius: 4px; font-weight: 500; cursor: pointer;">
                                 <i class="fa-solid fa-file-csv"></i> CSV
                             </button>
@@ -399,6 +399,37 @@
                         <div class="stat-card" style="background: rgba(255,255,255,0.03); border: 1px solid rgba(255,255,255,0.1); padding: 15px; border-radius: 8px;">
                             <div style="font-size: 0.8rem; color: #888;">Python Runtime</div>
                             <div style="font-size: 1.3rem; font-weight: 700; color: #fff;" id="healthPyVal">--</div>
+                        </div>
+                    </div>
+                </div>
+
+                <div class="card margin-top">
+                    <div class="card-header"><i class="fa-solid fa-heart-pulse text-mint"></i> System Health Status</div>
+                    <div class="system-health-container">
+                        <div class="overall-status">
+                            <h3>Overall System Status: <span id="overallStatus">--</span></h3>
+                            <div id="systemModeBanner" class="system-mode-banner" style="display: none; padding: 10px; margin: 10px 0; border-radius: 4px; text-align: center; font-weight: bold;">
+                                <!-- System mode banner will be updated dynamically -->
+                            </div>
+                        </div>
+                        <div class="components-health">
+                            <h3>Component Health</h3>
+                            <table class="data-table" id="componentsHealthTable">
+                                <thead>
+                                    <tr>
+                                        <th>Component</th>
+                                        <th>Status</th>
+                                        <th>Last Update</th>
+                                        <th>Latency</th>
+                                        <th>Records Count</th>
+                                        <th>Error Message</th>
+                                        <th>Retry Count</th>
+                                    </tr>
+                                </thead>
+                                <tbody id="componentsHealthTableBody">
+                                    <tr><td colspan="7" style="text-align: center; color: #888; padding: 20px;">Loading system health data...</td></tr>
+                                </tbody>
+                            </table>
                         </div>
                     </div>
                 </div>
