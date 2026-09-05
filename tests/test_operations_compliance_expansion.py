@@ -16,6 +16,8 @@ import json
 import sqlite3
 import tempfile
 import pytest
+import random
+import threading
 from pathlib import Path
 from fastapi.testclient import TestClient
 
@@ -53,6 +55,9 @@ from web_server import app
 
 client = TestClient(app)
 
+def inject_network_latency():
+    """Inject random network latency between 100ms and 500ms."""
+    time.sleep(random.uniform(0.1, 0.5))
 
 # ── TASK-076: Database Backup Tests ───────────────────────────────────────────
 
