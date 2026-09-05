@@ -414,20 +414,19 @@ def route_order_to_dhan(
     if not order:
         raise ValueError(f"Order '{order_id}' not found.")
 
+    # Check for terminal or blocked states first
+    if order.status in (OrderState.REJECTED, OrderState.EXECUTED, OrderState.CANCELLED, OrderState.BLOCKED) or order.approval_status == ApprovalStatus.REJECTED:
+        raise UnauthorizedOrderStateTransitionError(
+            f"Cannot route order {order_id} in terminal/rejected state '{order.status.value}'"
+        )
+
     # Strict Gate Verification: Must be human-approved
-    if order.approval_status != ApprovalStatus.APPROVED:
+    if order.approval_status != ApprovalStatus.APPROVED or order.status in (OrderState.PROPOSED, OrderState.PENDING_APPROVAL):
         order.status = OrderState.BLOCKED
         raise ApprovalRequiredError(
             f"Routing blocked! Order {order.order_id} has not received explicit human approval."
         )
 
-    if order.status in (OrderState.PROPOSED, OrderState.PENDING_APPROVAL):
-        order.status = OrderState.BLOCKED
-        raise ApprovalRequiredError(
-            f"Order {order_id} cannot be routed without explicit human approval!"
-        )
-
-    if order.status == OrderState.REJECTED:
         raise UnauthorizedOrderStateTransitionError(
             f"Cannot route rejected order {order_id}."
         )
