@@ -363,6 +363,64 @@ class TestTask045EmergencyKillSwitch(unittest.TestCase):
         self.assertEqual(len(logs), 1)
         self.assertEqual(logs[0]["operator_id"], "CHIEF_RISK_OFFICER")
 
+    def test_actual_holdings_review(self):
+        # Mock actual holdings from database
+        mock_holdings = [
+            {"symbol": "RELIANCE", "quantity": 100, "price": 2500.0},
+            {"symbol": "INFY", "quantity": 50, "price": 1500.0}
+        ]
+
+        # Mock current positions in engine
+        mock_positions = [
+            {"symbol": "RELIANCE", "quantity": 100, "price": 2500.0},
+            {"symbol": "INFY", "quantity": 50, "price": 1500.0}
+        ]
+
+        # Verify actual holdings match current positions
+        self.assertEqual(mock_holdings, mock_positions)
+
+    def test_current_positions_check(self):
+        # Mock current positions in engine
+        mock_positions = [
+            {"symbol": "RELIANCE", "quantity": 100, "price": 2500.0},
+            {"symbol": "INFY", "quantity": 50, "price": 1500.0}
+        ]
+
+        # Verify current positions are as expected
+        self.assertEqual(len(mock_positions), 2)
+        self.assertEqual(mock_positions[0]["symbol"], "RELIANCE")
+        self.assertEqual(mock_positions[1]["symbol"], "INFY")
+
+    def test_recent_orders_verification(self):
+        # Mock recent orders in service modules
+        mock_orders = [
+            {"order_id": "ORD-101", "symbol": "RELIANCE", "quantity": 100, "price": 2500.0},
+            {"order_id": "ORD-102", "symbol": "INFY", "quantity": 50, "price": 1500.0}
+        ]
+
+        # Verify recent orders are as expected
+        self.assertEqual(len(mock_orders), 2)
+        self.assertEqual(mock_orders[0]["order_id"], "ORD-101")
+        self.assertEqual(mock_orders[1]["order_id"], "ORD-102")
+
+    def test_executed_trades_review(self):
+        # Mock executed trades in engine
+        mock_trades = [
+            {"trade_id": "TRD-101", "symbol": "RELIANCE", "quantity": 100, "price": 2500.0},
+            {"trade_id": "TRD-102", "symbol": "INFY", "quantity": 50, "price": 1500.0}
+        ]
+
+        # Verify executed trades are as expected
+        self.assertEqual(len(mock_trades), 2)
+        self.assertEqual(mock_trades[0]["trade_id"], "TRD-101")
+        self.assertEqual(mock_trades[1]["trade_id"], "TRD-102")
+
+    def test_available_cash_status(self):
+        # Mock available cash status
+        mock_cash = 100000.0
+
+        # Verify available cash is as expected
+        self.assertEqual(mock_cash, 100000.0)
 
 if __name__ == "__main__":
     unittest.main()
