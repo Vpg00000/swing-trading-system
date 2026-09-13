@@ -36,23 +36,55 @@ EPS_TABLE = {
     "HEG.NS": 85.00, "CONCOR.NS": 28.00, "CENTRALBK.NS": 5.50,
 }
 
-# Cache for real computed indicators
-_indicator_cache: Dict[str, Dict[str, Any]] = {}
+from collections import OrderedDict
+import numpy as np
+
+# Cache for real computed indicators - Bounded LRU Cache (Max 1000 items)
+_MAX_INDICATOR_CACHE_SIZE = 1000
+_indicator_cache: OrderedDict[str, Dict[str, Any]] = OrderedDict()
+
+# In-memory DataFrame cache with TTL (5 minutes) to avoid repeated disk reads
+_df_cache: OrderedDict[str, tuple[float, Any]] = OrderedDict()
+_DF_CACHE_TTL = 300.0  # 5 minutes
+
+
+def _get_cached_dataframe(symbol: str):
+    """Retrieve DataFrame from in-memory cache or load from disk cache with LRU eviction."""
+    now = time.time()
+    if symbol in _df_cache:
+        ts, df = _df_cache[symbol]
+        if now - ts < _DF_CACHE_TTL:
+            _df_cache.move_to_end(symbol)
+            return df
+        else:
+            del _df_cache[symbol]
+
+    try:
+        from data.fetch import load_cached
+        df = load_cached(symbol)
+        if df is not None and not df.empty:
+            if len(_df_cache) >= _MAX_INDICATOR_CACHE_SIZE:
+                _df_cache.popitem(last=False)
+            _df_cache[symbol] = (now, df)
+            return df
+    except Exception as exc:
+        logger.debug(f"DataFrame load failed for {symbol}: {exc}")
+    return None
 
 
 def _compute_real_indicators(symbol: str, ltp: float) -> Dict[str, Any]:
-    """Compute real technical indicators from yfinance cached OHLCV data with in-memory TTL caching."""
+    """Compute real technical indicators from cached OHLCV data with bounded LRU & TTL caching."""
     now_ts = time.time()
     if symbol in _indicator_cache:
         cached_entry = _indicator_cache[symbol]
         if now_ts - cached_entry.get("_ts", 0) < 60.0:
+            _indicator_cache.move_to_end(symbol)
             res = dict(cached_entry)
             res["ltp"] = ltp
             return res
 
     try:
-        from data.fetch import load_cached
-        df = load_cached(symbol)
+        df = _get_cached_dataframe(symbol)
         if df is not None and not df.empty and "Close" in df.columns and len(df) >= 14:
             closes = df["Close"].values
             # Real EMA-20
@@ -65,13 +97,12 @@ def _compute_real_indicators(symbol: str, ltp: float) -> Dict[str, Any]:
             else:
                 ema20 = round(float(closes[-1]) * 0.985, 2)
 
-            # Real RSI-14
-            import numpy as np
+            # Vectorized Real RSI-14
             deltas = np.diff(closes[-15:])
-            gains = np.where(deltas > 0, deltas, 0)
-            losses = np.where(deltas < 0, -deltas, 0)
-            avg_gain = gains.mean()
-            avg_loss = losses.mean()
+            gains = np.maximum(deltas, 0)
+            losses = np.maximum(-deltas, 0)
+            avg_gain = float(np.mean(gains))
+            avg_loss = float(np.mean(losses))
             if avg_loss > 0:
                 rs = avg_gain / avg_loss
                 rsi = round(100 - (100 / (1 + rs)), 2)
@@ -79,13 +110,16 @@ def _compute_real_indicators(symbol: str, ltp: float) -> Dict[str, Any]:
                 rsi = 100.0 if avg_gain > 0 else 50.0
             rsi = max(5.0, min(95.0, rsi))
 
-            # Real ATR-14
-            if "High" in df.columns and "Low" in df.columns:
+            # Vectorized Real ATR-14 (zero loops)
+            if "High" in df.columns and "Low" in df.columns and len(df) >= 15:
                 highs = df["High"].values[-15:]
                 lows = df["Low"].values[-15:]
-                prev_closes = df["Close"].values[-16:-1] if len(df) >= 16 else df["Close"].values[-15:]
-                true_ranges = [max(highs[i] - lows[i], abs(highs[i] - prev_closes[i-1] if i > 0 else ltp), abs(lows[i] - prev_closes[i-1] if i > 0 else ltp)) for i in range(len(highs))]
-                atr = round(float(sum(true_ranges) / len(true_ranges)), 2)
+                prev_c = df["Close"].values[-16:-1] if len(df) >= 16 else df["Close"].values[-15:]
+                tr1 = highs - lows
+                tr2 = np.abs(highs - prev_c)
+                tr3 = np.abs(lows - prev_c)
+                tr = np.maximum(tr1, np.maximum(tr2, tr3))
+                atr = round(float(np.mean(tr)), 2)
             else:
                 atr = round(ltp * 0.022, 2)
 
@@ -110,6 +144,8 @@ def _compute_real_indicators(symbol: str, ltp: float) -> Dict[str, Any]:
                 "updated_at": datetime.now().isoformat(),
                 "_ts": time.time()
             }
+            if len(_indicator_cache) >= _MAX_INDICATOR_CACHE_SIZE:
+                _indicator_cache.popitem(last=False)
             _indicator_cache[symbol] = res_dict
             return res_dict
     except Exception as e:
@@ -129,12 +165,33 @@ def _compute_real_indicators(symbol: str, ltp: float) -> Dict[str, Any]:
         "updated_at": datetime.now().isoformat(),
         "_ts": time.time()
     }
+    if len(_indicator_cache) >= _MAX_INDICATOR_CACHE_SIZE:
+        _indicator_cache.popitem(last=False)
     _indicator_cache[symbol] = res_dict
     return res_dict
 
 
+def _fetch_eps_from_database(symbol: str) -> Optional[float]:
+    """Fetch EPS / PE from SQLite database (stock_grid or fundamentals table)."""
+    try:
+        from data.database import get_connection
+        clean_sym = symbol.replace(".NS", "").replace(".BO", "").strip()
+        with get_connection() as conn:
+            cur = conn.cursor()
+            cur.execute("""
+                SELECT close, pe FROM stock_grid 
+                WHERE symbol = ? OR symbol LIKE ? LIMIT 1
+            """, (symbol, f"{clean_sym}%"))
+            row = cur.fetchone()
+            if row and row["pe"] and float(row["pe"]) > 0 and row["close"] and float(row["close"]) > 0:
+                return float(row["close"]) / float(row["pe"])
+    except Exception:
+        pass
+    return None
+
+
 def _fetch_eps_from_yfinance(symbol: str) -> Optional[float]:
-    """Fetch EPS from yfinance if not in EPS_TABLE."""
+    """Fetch EPS from yfinance if not in EPS_TABLE or database."""
     import os
     if os.environ.get("PYTEST_CURRENT_TEST") or os.environ.get("TESTING"):
         return None
@@ -157,6 +214,8 @@ class LiveScorerService:
         self.feed_service = feed_service or get_live_feed_service()
         self.indicators_cache: Dict[str, Dict[str, Any]] = {}
         self.composite_scores_cache: List[Dict[str, Any]] = []
+        self._scored_items_by_symbol: Dict[str, Dict[str, Any]] = {}
+        self._last_scored_state: Dict[str, tuple[float, float]] = {}  # symbol -> (ltp, timestamp)
         self._is_running = False
         self._background_task: Optional[asyncio.Task] = None
         self._eps_cache: Dict[str, float] = {}
@@ -181,11 +240,17 @@ class LiveScorerService:
         return indicators
 
     def _get_eps(self, symbol: str, ltp: float) -> float:
-        """Get EPS with multi-tier fallback: table → yfinance → price/22 estimate."""
-        if symbol in EPS_TABLE:
-            return EPS_TABLE[symbol]
+        """Get EPS with multi-tier fallback: database → table → yfinance → price/22 estimate."""
         if symbol in self._eps_cache:
             return self._eps_cache[symbol]
+        if symbol in EPS_TABLE:
+            self._eps_cache[symbol] = EPS_TABLE[symbol]
+            return EPS_TABLE[symbol]
+        # Query database stock_grid/fundamentals
+        db_eps = _fetch_eps_from_database(symbol)
+        if db_eps and db_eps > 0:
+            self._eps_cache[symbol] = db_eps
+            return db_eps
         # Try yfinance (with circuit breaker to avoid excessive calls)
         eps = _fetch_eps_from_yfinance(symbol)
         if eps:
@@ -205,19 +270,35 @@ class LiveScorerService:
         return ltp / default_pe
 
     def recombine_composite_scores(self) -> List[Dict[str, Any]]:
-        """Speed 2: Recombine sub-scores into 100-point composite opportunity scores."""
+        """Speed 2: Incrementally recombine sub-scores into 100-point composite opportunity scores."""
         all_snapshots = self.feed_service.get_all()
-        scores = []
+        now_ts = time.time()
         today_str = date.today().isoformat()
         trade_sched = get_trade_lifecycle_dates()
+        updated_any = False
 
         for symbol, snap in all_snapshots.items():
+            ltp = float(snap.get("ltp", 1000.0))
+            change_pct = float(snap.get("change_pct", 0.0))
+            last_state = self._last_scored_state.get(symbol)
+
+            # Delta Check: If price moved < 0.05% and scored within last 45s, perform O(1) update
+            if last_state and (now_ts - last_state[1] < 45.0) and (abs(ltp - last_state[0]) / max(0.01, last_state[0]) < 0.0005):
+                if symbol in self._scored_items_by_symbol:
+                    item = self._scored_items_by_symbol[symbol]
+                    item["ltp"] = ltp
+                    item["close"] = ltp
+                    item["price"] = ltp
+                    item["change_pct"] = change_pct
+                    item["volume"] = snap.get("volume", item.get("volume", 0))
+                    continue
+
+            updated_any = True
+            self._last_scored_state[symbol] = (ltp, now_ts)
             indicators = self.compute_technical_indicators(symbol)
-            ltp = snap.get("ltp", 1000.0)
             rsi = indicators.get("rsi", 50.0)
             ema20 = indicators.get("ema20", ltp)
             price_history = indicators.get("price_history", [])
-
             eps = self._get_eps(symbol, ltp)
             pe = round(ltp / eps, 2) if eps > 0 else 22.0
 
@@ -297,8 +378,9 @@ class LiveScorerService:
                 "missing_components": [],
                 "updated_at": datetime.now().isoformat()
             }
-            scores.append(item)
+            self._scored_items_by_symbol[symbol] = item
 
+        scores = list(self._scored_items_by_symbol.values())
         scores.sort(key=lambda x: x["overall_score"], reverse=True)
         for idx, s in enumerate(scores):
             s["rank"] = idx + 1

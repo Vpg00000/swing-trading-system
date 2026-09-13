@@ -625,8 +625,11 @@ async def stream_execution_logs():
 
 
 @app.get("/api/stream/live-prices")
-async def stream_live_prices():
-    """SSE endpoint streaming live_cache deltas and interval composite score updates every 5-15 seconds."""
+async def stream_live_prices(
+    limit: Optional[int] = Query(20, description="Max live deltas to broadcast per interval"),
+    top_limit: Optional[int] = Query(10, description="Max top opportunities to include")
+):
+    """SSE endpoint streaming live_cache deltas and interval composite score updates with pagination controls."""
     async def price_generator():
         global ACTIVE_SSE_CONNECTIONS
         ACTIVE_SSE_CONNECTIONS += 1
@@ -636,24 +639,30 @@ async def stream_live_prices():
             feed_svc = get_live_feed_service()
             scorer_svc = get_live_scorer_service()
 
+            max_deltas = max(5, min(100, limit or 20))
+            max_top = max(3, min(50, top_limit or 10))
+
             while True:
                 try:
                     snapshots = feed_svc.get_all()
-                    top_scores = scorer_svc.get_composite_scores(limit=50)
+                    top_scores = scorer_svc.get_composite_scores(limit=max_top)
+                    delta_list = []
+                    for s in snapshots.values():
+                        if len(delta_list) >= max_deltas:
+                            break
+                        delta_list.append({
+                            "symbol": s["symbol"],
+                            "ltp": s["ltp"],
+                            "change_pct": round(((s["ltp"] - s["prev_close"]) / max(0.01, s["prev_close"])) * 100.0, 2),
+                            "updated_at": s["updated_at"]
+                        })
+
                     payload = {
                         "timestamp": datetime.datetime.now().isoformat(),
                         "market_state": feed_svc.get_market_state(),
-                        "top_opportunities": top_scores[:10],
+                        "top_opportunities": top_scores,
                         "symbol_count": len(snapshots),
-                        "live_deltas": [
-                            {
-                                "symbol": s["symbol"],
-                                "ltp": s["ltp"],
-                                "change_pct": round(((s["ltp"] - s["prev_close"]) / max(0.01, s["prev_close"])) * 100.0, 2),
-                                "updated_at": s["updated_at"]
-                            }
-                            for s in list(snapshots.values())[:30]
-                        ]
+                        "live_deltas": delta_list
                     }
                     yield f"data: {json.dumps(payload)}\n\n"
                 except Exception as exc:

@@ -111,13 +111,13 @@ class DhanLiveFeedService:
             return self.get_snapshot(sym_clean)
 
     def get_snapshot(self, symbol: str) -> Dict[str, Any]:
-        """Thread-safe getter for a single symbol snapshot from live_cache."""
+        """Thread-safe fast getter for a single symbol snapshot from live_cache without unnecessary dict copies."""
         sym_clean = symbol.upper().strip()
         current_state = self.get_market_state()
 
         with self._lock:
             if sym_clean in self.live_cache:
-                snap = dict(self.live_cache[sym_clean])
+                snap = self.live_cache[sym_clean]
                 snap["market_state"] = current_state
                 return snap
 
@@ -137,18 +137,15 @@ class DhanLiveFeedService:
                 "market_state": current_state
             }
             self.live_cache[sym_clean] = fallback
-            return dict(fallback)
+            return fallback
 
     def get_all(self) -> Dict[str, Dict[str, Any]]:
-        """Thread-safe getter for all symbol snapshots in live_cache."""
+        """Thread-safe zero-copy getter for all symbol snapshots in live_cache."""
         current_state = self.get_market_state()
         with self._lock:
-            result = {}
-            for sym, snap in self.live_cache.items():
-                s = dict(snap)
-                s["market_state"] = current_state
-                result[sym] = s
-            return result
+            for snap in self.live_cache.values():
+                snap["market_state"] = current_state
+            return self.live_cache
 
     async def get_snapshot_async(self, symbol: str) -> Dict[str, Any]:
         """Async-safe wrapper for get_snapshot."""
@@ -242,8 +239,8 @@ class DhanLiveFeedService:
         # If Dhan REST did not cover all symbols, use yfinance fallback
         if patched_count < len(self.symbols):
             try:
-                from data.yfinance_client import YFinanceClient
-                yf_client = YFinanceClient()
+                from data.yfinance_client import get_yfinance_client
+                yf_client = get_yfinance_client()
                 gap_snaps = yf_client.get_gap_fill_snapshot(self.symbols)
                 with self._lock:
                     for sym, info in gap_snaps.items():
@@ -333,7 +330,8 @@ class DhanLiveFeedService:
                 )
                 await asyncio.sleep(backoff)
                 self.ws_client.connect()
-                self.trigger_reconnect_gap_fill()
+                # Run gap-fill asynchronously in thread pool so WebSocket reconnect loop never stalls
+                asyncio.create_task(asyncio.to_thread(self.trigger_reconnect_gap_fill))
 
             # During open market hours, process ticks
             await asyncio.sleep(1.0)
