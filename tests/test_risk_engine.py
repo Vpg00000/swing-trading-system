@@ -14,6 +14,7 @@ from engine.risk_engine import (
     check_single_stock_position_limit,
     check_sector_concentration_limit,
     check_daily_loss_circuit_breaker,
+    check_circuit_proximity,
     evaluate_margin_call_and_deleverage,
     evaluate_full_portfolio_risk
 )
@@ -140,3 +141,24 @@ def test_evaluate_full_portfolio_risk():
     assert "cvar" in res
     assert "stress_test" in res
     assert "kill_switch" in res
+
+
+def test_check_circuit_proximity():
+    # Test safe middle price
+    safe = check_circuit_proximity("COALINDIA.NS", price=105.0, prev_close=100.0, circuit_limit_pct=10.0, buffer_pct=1.0)
+    assert safe["status"] == "PASSED"
+    assert not safe["is_near_circuit"]
+    assert safe["order_entry_allowed"]
+
+    # Test near upper circuit (110 is upper circuit for 10% limit)
+    near_upper = check_circuit_proximity("COALINDIA.NS", price=109.5, prev_close=100.0, circuit_limit_pct=10.0, buffer_pct=1.0)
+    assert near_upper["is_near_upper_circuit"]
+    assert near_upper["is_near_circuit"]
+    assert not near_upper["order_entry_allowed"]
+
+    # Test near lower circuit (90 is lower circuit for 10% limit)
+    near_lower = check_circuit_proximity("COALINDIA.NS", price=90.5, prev_close=100.0, circuit_limit_pct=10.0, buffer_pct=1.0)
+    assert near_lower["is_near_lower_circuit"]
+    assert near_lower["is_near_circuit"]
+    assert "Stop-loss execution may fail" in near_lower["warning"]
+

@@ -3481,6 +3481,7 @@ async def serve_service_worker():
 # ── Phase 20: Algorithmic Execution Engine & Pacing Endpoints (T-250, T-251, T-253) ──
 from engine.algo_execution import global_algo_engine
 from engine.backtest import (
+    run_standard_momentum_backtest,
     run_vectorized_backtest,
     run_event_driven_backtest,
     run_multi_asset_backtest,
@@ -3572,36 +3573,70 @@ async def process_algo_tick(payload: Dict[str, Any] = Body(...)):
 
 @app.api_route("/api/backtest/advanced", methods=["GET", "POST"])
 async def run_advanced_backtest(payload: Dict[str, Any] = Body(default={})):
-    """T-255 & T-256: High-Speed Vectorized & Event-Driven backtest API."""
-    import numpy as np
+    """T-255 & T-256: High-Speed Authentic Market Data Vectorized, Momentum & Event-Driven backtest API."""
     import pandas as pd
-    mode = payload.get("mode", "vectorized")
-    n_bars = int(payload.get("bars", 100))
+    from data.fetch import load_cached
+    mode = payload.get("mode", "momentum")
+    n_bars = int(payload.get("bars", 250))
+    initial_capital = float(payload.get("initial_capital", 1000000.0))
+    symbols = payload.get("symbols")
 
-    # Generate synthetic price series for testing/simulation
-    dates = pd.date_range("2024-01-01", periods=n_bars)
-    prices = 100.0 + np.cumsum(np.random.normal(0.2, 1.5, n_bars))
-    df = pd.DataFrame({"date": dates, "close": prices})
-
-    if mode == "event_driven":
-        events = [{"symbol": "NIFTY50", "close": p, "eps_surprise_pct": 4.0 if i % 10 == 0 else 1.0} for i, p in enumerate(prices)]
-        res = run_event_driven_backtest(events)
-    else:
-        res = run_vectorized_backtest(df)
+    if mode in ("momentum", "standard"):
+        res = run_standard_momentum_backtest(
+            symbols=symbols,
+            initial_capital=initial_capital,
+            lookback_bars=n_bars
+        )
+    elif mode == "event_driven":
+        symbol = payload.get("symbol", "RELIANCE.NS")
+        df = load_cached(symbol)
+        if df.empty or "Close" not in df.columns:
+            df = load_cached("NIFTY")
+        if not df.empty and "Close" in df.columns:
+            df_slice = df.tail(n_bars)
+            events = [
+                {
+                    "symbol": symbol,
+                    "close": float(row["Close"]),
+                    "eps_surprise_pct": 3.5 if i % 12 == 0 else 0.5,
+                    "timestamp": str(idx)
+                }
+                for i, (idx, row) in enumerate(df_slice.iterrows())
+            ]
+            res = run_event_driven_backtest(events)
+        else:
+            res = {"status": "ERROR", "message": "No historical data available for event-driven backtest"}
+    else:  # vectorized
+        symbol = payload.get("symbol", "RELIANCE.NS")
+        df = load_cached(symbol)
+        if df.empty or "Close" not in df.columns:
+            df = load_cached("NIFTY")
+        if not df.empty and "Close" in df.columns:
+            df_norm = df.copy().tail(n_bars)
+            df_norm.columns = [c.lower() for c in df_norm.columns]
+            res = run_vectorized_backtest(df_norm, initial_capital=initial_capital)
+        else:
+            res = {"status": "ERROR", "message": f"Historical data unavailable for {symbol}"}
 
     return {"status": "SUCCESS", "mode": mode, "result": res}
 
 
 @app.api_route("/api/backtest/multi_asset", methods=["GET", "POST"])
 async def run_multi_asset_backtest_endpoint(payload: Dict[str, Any] = Body(default={})):
-    """T-257: Multi-Asset Portfolio Backtest Engine endpoint."""
-    import numpy as np
+    """T-257: Multi-Asset Portfolio Backtest Engine endpoint using real market data."""
     import pandas as pd
+    from data.fetch import load_cached
     symbols = payload.get("symbols", ["RELIANCE.NS", "TCS.NS", "INFY.NS", "HDFCBANK.NS"])
     data_dict = {}
     for sym in symbols:
-        prices = 500.0 + np.cumsum(np.random.normal(0.3, 2.0, 100))
-        data_dict[sym] = pd.DataFrame({"close": prices})
+        df = load_cached(sym)
+        if not df.empty and ("Close" in df.columns or "close" in df.columns):
+            df_norm = df.copy().tail(150)
+            df_norm.columns = [c.lower() for c in df_norm.columns]
+            data_dict[sym] = df_norm
+
+    if not data_dict:
+        return {"status": "ERROR", "message": "No data found for symbols"}
 
     res = run_multi_asset_backtest(data_dict)
     return {"status": "SUCCESS", "result": res}
@@ -3609,13 +3644,21 @@ async def run_multi_asset_backtest_endpoint(payload: Dict[str, Any] = Body(defau
 
 @app.api_route("/api/backtest/optimize", methods=["GET", "POST"])
 async def optimize_parameters(payload: Dict[str, Any] = Body(default={})):
-    """T-258: Parameter Grid Search & Bayesian Optimization endpoint."""
-    import numpy as np
+    """T-258: Parameter Grid Search & Bayesian Optimization endpoint using real market data."""
     import pandas as pd
+    from data.fetch import load_cached
     method = payload.get("method", "grid")
-    prices = 100.0 + np.cumsum(np.random.normal(0.1, 1.0, 100))
-    df = pd.DataFrame({"close": prices})
-    data = {"NIFTY": df}
+    symbol = payload.get("symbol", "RELIANCE.NS")
+    df = load_cached(symbol)
+    if df.empty or "Close" not in df.columns:
+        df = load_cached("TCS.NS")
+
+    if df.empty:
+        return {"status": "ERROR", "message": "No historical data for optimization"}
+
+    df_norm = df.copy().tail(120)
+    df_norm.columns = [c.lower() for c in df_norm.columns]
+    data = {symbol: df_norm}
 
     if method == "bayesian":
         res = run_bayesian_optimization(data, param_bounds={"fast_period": (3, 10), "slow_period": (15, 30)})

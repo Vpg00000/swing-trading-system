@@ -33,6 +33,8 @@ class Candidate:
     stop_distance_pct: float
     stop_price: float
     position_size_inr: float
+    vol_weighted_score: float = 0.0
+    beta_adjusted_size_inr: float = 0.0
 
 
 def compute_atr(df: pd.DataFrame, window: int = ATR_WINDOW) -> float:
@@ -56,6 +58,93 @@ def momentum_score(df: pd.DataFrame) -> tuple[float, float, float]:
     return score, ret_3m, ret_6m
 
 
+def compute_volume_weighted_momentum(df: pd.DataFrame) -> tuple[float, float, float, float]:
+    """
+    Calculates 3M/6M blended momentum scaled by 20-DMA volume confirmation factor.
+    Returns: (vol_weighted_score, raw_score, ret_3m, ret_6m)
+    Formula:
+      raw_score = 0.4 * ret_3m + 0.6 * ret_6m
+      vol_ratio = recent_volume / 20_day_avg_volume
+      vol_factor = max(0.6, min(1.8, 0.8 + 0.4 * vol_ratio))
+      vol_weighted_score = raw_score * vol_factor
+    """
+    raw_score, ret_3m, ret_6m = momentum_score(df)
+    if np.isnan(raw_score):
+        return np.nan, np.nan, np.nan, np.nan
+
+    if "Volume" in df.columns and len(df["Volume"]) >= 20:
+        vol_20ma = float(df["Volume"].tail(20).mean())
+        recent_vol = float(df["Volume"].iloc[-1])
+        vol_ratio = (recent_vol / vol_20ma) if vol_20ma > 0 else 1.0
+        vol_factor = max(0.6, min(1.8, 0.8 + 0.4 * vol_ratio))
+        vol_weighted_score = raw_score * vol_factor
+    else:
+        vol_weighted_score = raw_score
+
+    return float(vol_weighted_score), float(raw_score), float(ret_3m), float(ret_6m)
+
+
+def relative_strength_within_sector(
+    symbol: str,
+    sector_symbols: list[str],
+    lookback_days: int = TRADING_DAYS_3M
+) -> dict[str, Any]:
+    """
+    Computes relative strength ranking and percentile of symbol within its sector peers.
+    Higher percentile (80-100) indicates the stock is a sector leader.
+    """
+    peer_returns = {}
+    for sym in sector_symbols:
+        df = load_cached(sym)
+        if df.empty or len(df) < lookback_days + 1 or "Close" not in df.columns:
+            continue
+        c = df["Close"]
+        ret = float((c.iloc[-1] / c.iloc[-lookback_days]) - 1.0)
+        peer_returns[sym] = ret
+
+    if not peer_returns or symbol not in peer_returns:
+        return {
+            "symbol": symbol,
+            "percentile_rank": 50.0,
+            "rank": 1,
+            "total_peers": len(peer_returns),
+            "symbol_return": 0.0,
+            "is_sector_leader": False
+        }
+
+    sorted_peers = sorted(peer_returns.items(), key=lambda x: x[1], reverse=True)
+    rank = next(idx + 1 for idx, (s, _) in enumerate(sorted_peers) if s == symbol)
+    total_peers = len(sorted_peers)
+    percentile = round(((total_peers - rank) / max(1, total_peers - 1)) * 100.0, 1) if total_peers > 1 else 100.0
+
+    return {
+        "symbol": symbol,
+        "percentile_rank": percentile,
+        "rank": rank,
+        "total_peers": total_peers,
+        "symbol_return": round(peer_returns[symbol] * 100.0, 2),
+        "is_sector_leader": percentile >= 75.0
+    }
+
+
+def calculate_beta_adjusted_size(
+    base_position_size: float,
+    beta: float,
+    target_beta: float = 1.0,
+    min_scale: float = 0.5,
+    max_scale: float = 1.5
+) -> float:
+    """
+    Calculates beta-adjusted position size to equalize volatility risk across portfolio positions.
+    High beta stocks (>1.5) get downscaled; low beta stocks (<0.8) get upscaled.
+    """
+    if beta <= 0 or np.isnan(beta):
+        return base_position_size
+    scale = target_beta / beta
+    clipped_scale = max(min_scale, min(max_scale, scale))
+    return round(base_position_size * clipped_scale, 2)
+
+
 def evaluate_universe(capital_inr: float, symbols: list[str] = None) -> list[Candidate]:
     symbols = symbols or EQUITY_UNIVERSE
     risk_budget = capital_inr * RISK_PER_TRADE_PCT
@@ -70,7 +159,7 @@ def evaluate_universe(capital_inr: float, symbols: list[str] = None) -> list[Can
         if avg_turnover < MIN_AVG_DAILY_TURNOVER_INR:
             continue  # liquidity filter
 
-        score, ret_3m, ret_6m = momentum_score(df)
+        vol_score, score, ret_3m, ret_6m = compute_volume_weighted_momentum(df)
         if np.isnan(score):
             continue
 
@@ -94,10 +183,13 @@ def evaluate_universe(capital_inr: float, symbols: list[str] = None) -> list[Can
             stop_distance_pct=stop_distance_pct,
             stop_price=stop_price,
             position_size_inr=position_size,
+            vol_weighted_score=vol_score,
+            beta_adjusted_size_inr=position_size,
         ))
 
     candidates.sort(key=lambda c: c.momentum_score, reverse=True)
     return candidates
+
 
 
 if __name__ == "__main__":

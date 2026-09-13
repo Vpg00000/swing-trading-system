@@ -405,6 +405,69 @@ def check_daily_loss_circuit_breaker(
     }
 
 
+def check_circuit_proximity(
+    symbol: str,
+    price: float,
+    prev_close: float,
+    circuit_limit_pct: float = 10.0,
+    buffer_pct: float = 1.0
+) -> Dict[str, Any]:
+    """
+    Individual Stock Circuit Breaker Proximity Guard.
+    Detects if an equity is within buffer_pct (default 1.0%) of its daily circuit limits (upper or lower).
+    Protects against execution failure:
+      - Near lower circuit: Stop-loss will fail or not fill, locking capital into freeze.
+      - Near upper circuit: New buy orders will be trapped at the ceiling with high gap-down risk.
+    """
+    if prev_close <= 0 or price <= 0:
+        return {
+            "symbol": symbol,
+            "is_near_circuit": False,
+            "is_near_upper_circuit": False,
+            "is_near_lower_circuit": False,
+            "status": "DATA_UNAVAILABLE",
+            "upper_circuit": 0.0,
+            "lower_circuit": 0.0,
+            "distance_to_upper_pct": 0.0,
+            "distance_to_lower_pct": 0.0,
+            "warning": None
+        }
+
+    upper_circuit = round(prev_close * (1.0 + circuit_limit_pct / 100.0), 2)
+    lower_circuit = round(prev_close * (1.0 - circuit_limit_pct / 100.0), 2)
+
+    dist_upper_pct = round(((upper_circuit - price) / price) * 100.0, 2)
+    dist_lower_pct = round(((price - lower_circuit) / price) * 100.0, 2)
+
+    is_near_upper = dist_upper_pct <= buffer_pct or price >= upper_circuit
+    is_near_lower = dist_lower_pct <= buffer_pct or price <= lower_circuit
+    is_near_circuit = is_near_upper or is_near_lower
+
+    warning = None
+    if is_near_lower:
+        warning = f"CRITICAL: {symbol} is within {dist_lower_pct:.1f}% of lower circuit (₹{lower_circuit}). Stop-loss execution may fail!"
+    elif is_near_upper:
+        warning = f"ATTENTION: {symbol} is within {dist_upper_pct:.1f}% of upper circuit (₹{upper_circuit}). Ceiled order entry risk!"
+
+    return {
+        "symbol": symbol,
+        "price": round(price, 2),
+        "prev_close": round(prev_close, 2),
+        "circuit_limit_pct": circuit_limit_pct,
+        "upper_circuit": upper_circuit,
+        "lower_circuit": lower_circuit,
+        "distance_to_upper_pct": dist_upper_pct,
+        "distance_to_lower_pct": dist_lower_pct,
+        "is_near_circuit": is_near_circuit,
+        "is_near_upper_circuit": is_near_upper,
+        "is_near_lower_circuit": is_near_lower,
+        "order_entry_allowed": not is_near_circuit,
+        "status": "CIRCUIT_RISK_BREACH" if is_near_circuit else "PASSED",
+        "warning": warning
+    }
+
+
+
 def evaluate_margin_call_and_deleverage(
     total_equity: float,
     margin_used: float,

@@ -194,6 +194,7 @@ def compute_composite_score(
     pledged_pct: float = 0.0,
     has_upcoming_event: bool = False,
     sector_stacking_risk: bool = False,
+    circuit_risk: bool = False,
 ) -> tuple[float, dict[str, float], list[str], list[str]]:
     """
     Computes the /100 composite score using the 10-component formula.
@@ -266,7 +267,10 @@ def compute_composite_score(
     if has_upcoming_event:
         concerns.append("corporate action/board meeting within 21 days")
     if sector_stacking_risk:
-        concerns.append("sector-stacking risk (sector cap)")
+        concerns.append("sector-stacking risk: sector exposure exceeds 20% limit")
+    if circuit_risk:
+        concerns.append("circuit risk: price is near daily circuit limit")
+
 
     # ── Total ─────────────────────────────────────────────────────────────────
     total = (
@@ -305,13 +309,20 @@ def classify_action(
     sector_stacking_risk: bool,
     sector_overall_score: Optional[float],
     concerns: list[str],
+    circuit_risk: bool = False,
 ) -> str:
     """
     Classifies the suggested action using the rich vocabulary.
+    Hard gates:
+      - Emergency market regime -> CASH (or EXIT if held)
+      - Circuit proximity -> WAIT_FOR_CIRCUIT_CLEARANCE (prevents frozen orders/slippage)
+      - Sector stacking (>20% portfolio cap) -> HOLD OFF / SECTOR CONCENTRATED (or REDUCE if held)
     """
     if is_held:
         if regime_state == "EMERGENCY":
             return "EXIT"
+        if circuit_risk:
+            return "REDUCE"
         if composite_score < 30.0:
             return "EXIT"
         if pledged_pct >= 50.0:
@@ -330,14 +341,16 @@ def classify_action(
         # Not held
         if regime_state == "EMERGENCY":
             return "CASH"
+        if circuit_risk:
+            return "WAIT_FOR_CIRCUIT_CLEARANCE"
+        if sector_stacking_risk:
+            return "HOLD OFF / SECTOR CONCENTRATED"
         if regime_state == "RISK-OFF":
             if composite_score >= 75.0:
                 return "WATCH"  # wait for regime improvement
             return "WAIT"
         if news_flagged and priced_in_status_unknown(rank, composite_score):
             return "WAIT_FOR_NEWS_CONFIRMATION"
-        if sector_stacking_risk:
-            return "WAIT"
         if (
             sector_overall_score is not None
             and sector_overall_score > 80.0
@@ -386,6 +399,7 @@ def evaluate_decision(
     ownership_score: Optional[float] = None,
     insider_score: Optional[float] = None,
     bulk_block_score: Optional[float] = None,
+    circuit_risk: bool = False,
 ) -> DecisionResult:
     """
     Runs the full decision loop for a symbol and returns a DecisionResult.
@@ -418,6 +432,7 @@ def evaluate_decision(
         pledged_pct=pledged_pct,
         has_upcoming_event=has_upcoming_event,
         sector_stacking_risk=sector_stacking_risk,
+        circuit_risk=circuit_risk,
     )
 
     action = classify_action(
@@ -434,7 +449,9 @@ def evaluate_decision(
         sector_stacking_risk=sector_stacking_risk,
         sector_overall_score=sector_overall_score,
         concerns=concerns,
+        circuit_risk=circuit_risk,
     )
+
 
     return DecisionResult(
         symbol=symbol,

@@ -359,7 +359,9 @@ def generate_report_data(save_prompts: bool = False) -> dict:
         pledged_pct = pledge.pledged_pct if pledge else 0.0
         
         has_upcoming_event = sym in event_symbols
-        sector_stacking_risk = False
+        other_holdings = [x for x in portfolio["holdings"] if x["symbol"] != sym]
+        sector_stacking_risk = check_new_position(sym, h.get("value_inr", 0.0), other_holdings, capital) is not None
+
         
         dec = evaluate_decision(
             symbol=sym,

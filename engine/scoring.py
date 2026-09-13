@@ -560,3 +560,99 @@ class SectorMomentumMatrix:
         """Alias for calculate_matrix()."""
         return self.calculate_matrix()
 
+
+def calculate_mean_reversion_score(
+    rsi: float,
+    bb_position_pct: float,
+    z_score: float = 0.0
+) -> float:
+    """
+    Computes a 0-100 Mean Reversion Signal score.
+    Higher score indicates high probability of oversold bounce/mean reversion:
+      - RSI oversold: < 30 gives highest points, 30-40 moderate points, > 65 low points.
+      - BB position: % distance within Bollinger Bands (0.0 = lower band, 1.0 = upper band).
+        Below lower band (< 0.0) gives max oversold points.
+      - Z-Score: normalized distance from 20-DMA (e.g. < -2.0 standard deviations).
+    """
+    if rsi <= 25.0:
+        rsi_pts = 40.0
+    elif rsi <= 35.0:
+        rsi_pts = 30.0 + (35.0 - rsi)
+    elif rsi <= 45.0:
+        rsi_pts = 15.0 + (45.0 - rsi) * 1.5
+    elif rsi <= 60.0:
+        rsi_pts = 10.0
+    else:
+        rsi_pts = max(0.0, 10.0 - (rsi - 60.0) * 0.5)
+
+    if bb_position_pct <= 0.0:
+        bb_pts = 35.0
+    elif bb_position_pct <= 0.20:
+        bb_pts = 25.0 + (0.20 - bb_position_pct) * 50.0
+    elif bb_position_pct <= 0.50:
+        bb_pts = 10.0 + (0.50 - bb_position_pct) * 50.0
+    else:
+        bb_pts = max(0.0, 10.0 - (bb_position_pct - 0.50) * 20.0)
+
+    if z_score <= -2.5:
+        z_pts = 25.0
+    elif z_score <= -1.5:
+        z_pts = 15.0 + (-1.5 - z_score) * 10.0
+    elif z_score <= 0.0:
+        z_pts = max(0.0, -z_score * 10.0)
+    else:
+        z_pts = 0.0
+
+    total = rsi_pts + bb_pts + z_pts
+    return round(max(0.0, min(100.0, total)), 1)
+
+
+def calculate_confluence_score(
+    signals: Dict[str, bool],
+    weights: Optional[Dict[str, float]] = None
+) -> Dict[str, Any]:
+    """
+    Computes a 0-100 technical confluence score based on multi-indicator agreement.
+    Awards a confluence bonus when 4 or more indicators agree.
+    """
+    default_weights = {
+        "rsi_oversold_or_divergence": 1.0,
+        "macd_bullish": 1.0,
+        "price_above_ema20": 1.2,
+        "ema_trend_aligned": 1.2,
+        "volume_expansion": 1.4,
+        "supertrend_bullish": 1.0,
+        "vwap_reclaimed": 1.2,
+    }
+    w = weights or default_weights
+    active_count = 0
+    total_weighted_points = 0.0
+    max_weighted_points = 0.0
+
+    for key, weight in w.items():
+        max_weighted_points += weight
+        if signals.get(key, False):
+            active_count += 1
+            total_weighted_points += weight
+
+    base_ratio = (total_weighted_points / max_weighted_points) if max_weighted_points > 0 else 0.0
+    score = base_ratio * 80.0
+
+    # Non-linear confluence bonus for 4+ aligned indicators
+    if active_count >= 5:
+        score += 20.0
+    elif active_count >= 4:
+        score += 12.0
+    elif active_count >= 3:
+        score += 5.0
+
+    final_score = round(max(0.0, min(100.0, score)), 1)
+    return {
+        "confluence_score": final_score,
+        "active_signals_count": active_count,
+        "total_indicators_tracked": len(w),
+        "is_high_confluence": active_count >= 4,
+        "confluence_strength": "HIGH" if active_count >= 4 else ("MODERATE" if active_count >= 2 else "LOW")
+    }
+
+

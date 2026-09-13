@@ -151,17 +151,16 @@ def _compute_real_indicators(symbol: str, ltp: float) -> Dict[str, Any]:
     except Exception as e:
         logger.debug(f"Real indicator compute failed for {symbol}: {e}")
 
-    # Fallback: LTP-based approximation
-    hash_val = sum(ord(c) for c in symbol)
-    ema20 = round(ltp * (0.98 + (hash_val % 5) * 0.004), 2)
-    rsi_base = 50.0 + ((hash_val % 30) - 15)
-    rsi = round(max(25.0, min(75.0, rsi_base)), 2)
-    atr = round(ltp * 0.022, 2)
+    # When historical data is pending or insufficient, do not generate synthetic fake indicators
     res_dict = {
-        "symbol": symbol, "ema20": ema20, "rsi": rsi, "atr": atr,
-        "upper_band": round(ltp * 1.035, 2), "lower_band": round(ltp * 0.965, 2),
-        "price_history": [round(ltp * (0.97 + i * 0.006), 2) for i in range(10)],
-        "source": "APPROXIMATE",
+        "symbol": symbol,
+        "ema20": round(ltp, 2) if ltp > 0 else 0.0,
+        "rsi": 50.0,
+        "atr": 0.0,
+        "upper_band": 0.0,
+        "lower_band": 0.0,
+        "price_history": [round(ltp, 2)] if ltp > 0 else [],
+        "source": "DATA_PENDING",
         "updated_at": datetime.now().isoformat(),
         "_ts": time.time()
     }
