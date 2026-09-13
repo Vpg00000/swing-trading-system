@@ -646,15 +646,20 @@ def resolve_multi_agent_consensus(model_predictions: Dict[str, Dict]) -> Dict:
     if not model_predictions:
         return {"consensus_signal": "NEUTRAL", "consensus_score": 0.0, "is_unanimous": False, "contradictions": ["No model inputs provided"]}
 
-    signals = [data.get("signal", "HOLD").upper() for data in model_predictions.values()]
-    scores = [float(data.get("score", 50.0)) for data in model_predictions.values()]
-    confidences = [float(data.get("confidence", 0.5)) for data in model_predictions.values()]
+    # Only consider successfully evaluated models for voting and consensus
+    valid_predictions = {k: v for k, v in model_predictions.items() if v.get("status") == "SUCCESS"}
+    if not valid_predictions:
+        valid_predictions = model_predictions
+
+    signals = [data.get("signal", "HOLD").upper() for data in valid_predictions.values()]
+    scores = [float(data.get("score", 50.0)) for data in valid_predictions.values()]
+    confidences = [float(data.get("confidence", 0.5)) for data in valid_predictions.values()]
 
     bullish_votes = sum(1 for s in signals if "BUY" in s)
     bearish_votes = sum(1 for s in signals if "SELL" in s or "BEAR" in s or "AVOID" in s)
     neutral_votes = sum(1 for s in signals if "HOLD" in s or "NEUTRAL" in s or "WATCH" in s)
 
-    total_models = len(model_predictions)
+    total_models = len(valid_predictions)
     is_unanimous = len(set(signals)) == 1
     avg_score = round(float(sum(scores) / max(1, total_models)), 2)
     avg_confidence = round(float(sum(confidences) / max(1, total_models)), 2)
@@ -697,13 +702,17 @@ def query_ai_consensus(prompt: str = "Evaluate swing trading market opportunity 
         f"Be concise and specific."
     )
 
-    model_configs = [
-        ("openai/gpt-oss-20b", "GROQ", lambda: query_groq_api(signal_prompt, model="openai/gpt-oss-20b")),
-        ("gemini-2.5-flash", "GEMINI", lambda: query_gemini_api(signal_prompt, model="gemini-2.5-flash")),
-        ("deepseek-chat", "DEEPSEEK", lambda: query_deepseek_api(signal_prompt)),
-        ("mistral-small", "MISTRAL", lambda: query_mistral_api(signal_prompt)),
-        ("openrouter-mistral", "OPENROUTER", lambda: query_openrouter_api(signal_prompt)),
-    ]
+    model_configs = []
+    if GROQ_API_KEY:
+        model_configs.append(("openai/gpt-oss-20b", "GROQ", lambda: query_groq_api(signal_prompt, model="openai/gpt-oss-20b")))
+    if GEMINI_API_KEY:
+        model_configs.append(("gemini-2.5-flash", "GEMINI", lambda: query_gemini_api(signal_prompt, model="gemini-2.5-flash")))
+    if DEEPSEEK_API_KEY:
+        model_configs.append(("deepseek-chat", "DEEPSEEK", lambda: query_deepseek_api(signal_prompt)))
+    if MISTRAL_API_KEY:
+        model_configs.append(("mistral-small", "MISTRAL", lambda: query_mistral_api(signal_prompt)))
+    if OPENROUTER_API_KEY:
+        model_configs.append(("openrouter-mistral", "OPENROUTER", lambda: query_openrouter_api(signal_prompt)))
 
     predictions = {}
     active_models = []
@@ -724,14 +733,19 @@ def query_ai_consensus(prompt: str = "Evaluate swing trading market opportunity 
             active_models.append(model_name)
             logger.info(f"[AIConsensus] {provider}:{model_name} → {signal} ({confidence:.0%})")
         except Exception as exc:
-            logger.warning(f"[AIConsensus] {provider}:{model_name} failed: {exc}")
+            err_msg = str(exc)
+            # Log as debug/notice if it's a quota or balance error to keep pipeline log clean
+            if any(k in err_msg for k in ["402", "429", "401", "Insufficient Balance", "Rate limit", "User not found"]):
+                logger.debug(f"[AIConsensus] {provider}:{model_name} offline or quota exhausted: {err_msg}")
+            else:
+                logger.warning(f"[AIConsensus] {provider}:{model_name} notice: {err_msg}")
             predictions[f"{provider}:{model_name}"] = {
                 "provider": provider,
                 "signal": "HOLD",
                 "score": 50.0,
                 "confidence": 0.5,
                 "status": "FAILED",
-                "error": str(exc)
+                "error": err_msg
             }
 
     # Also try local Ollama
