@@ -4887,7 +4887,7 @@ async def ai_multi_dispatch(payload: Dict[str, Any] = Body(...)):
                 if not api_key:
                     raise ValueError("GEMINI_API_KEY not set")
                 genai.configure(api_key=api_key)
-                model = genai.GenerativeModel("gemini-1.5-flash")
+                model = genai.GenerativeModel("gemini-2.5-flash")
                 resp = await asyncio.to_thread(model.generate_content, prompt)
                 result["output"] = resp.text
                 result["signal"] = "BULLISH" if "bull" in resp.text.lower() else "BEARISH" if "bear" in resp.text.lower() else "NEUTRAL"
@@ -4898,8 +4898,12 @@ async def ai_multi_dispatch(payload: Dict[str, Any] = Body(...)):
                 api_key = os.environ.get("GROQ_API_KEY", "")
                 if not api_key:
                     raise ValueError("GROQ_API_KEY not set")
-                headers = {"Authorization": f"Bearer {api_key}", "Content-Type": "application/json"}
-                body_json = {"model": "llama3-8b-8192", "messages": [
+                headers = {
+                    "Authorization": f"Bearer {api_key}",
+                    "Content-Type": "application/json",
+                    "User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36"
+                }
+                body_json = {"model": "openai/gpt-oss-20b", "messages": [
                     {"role": "system", "content": "You are an expert Indian equity swing trading analyst."},
                     {"role": "user", "content": prompt}
                 ], "max_tokens": 512}

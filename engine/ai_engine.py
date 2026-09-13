@@ -57,7 +57,11 @@ def _http_post_json(url: str, payload: dict, headers: dict, timeout: int = 30) -
         ssl_ctx.verify_mode = ssl.CERT_NONE
 
     data = json.dumps(payload).encode("utf-8")
-    req = urllib.request.Request(url, data=data, headers={"Content-Type": "application/json", **headers})
+    default_headers = {
+        "Content-Type": "application/json",
+        "User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36"
+    }
+    req = urllib.request.Request(url, data=data, headers={**default_headers, **headers})
     try:
         with urllib.request.urlopen(req, timeout=timeout, context=ssl_ctx) as resp:
             return json.loads(resp.read().decode("utf-8"))
@@ -68,7 +72,7 @@ def _http_post_json(url: str, payload: dict, headers: dict, timeout: int = 30) -
         raise RuntimeError(str(exc))
 
 
-def query_groq_api(prompt: str, model: str = "llama-3.3-70b-versatile", system: str = "You are a swing trading analyst for Indian equities.") -> str:
+def query_groq_api(prompt: str, model: str = "openai/gpt-oss-20b", system: str = "You are a swing trading analyst for Indian equities.") -> str:
     """Query Groq cloud API - fastest inference, generous free tier."""
     if not GROQ_API_KEY:
         raise RuntimeError("GROQ_API_KEY not configured")
@@ -119,11 +123,11 @@ def query_mistral_api(prompt: str, model: str = "mistral-small-latest") -> str:
     return result["choices"][0]["message"]["content"].strip()
 
 
-def query_gemini_api(prompt: str) -> str:
+def query_gemini_api(prompt: str, model: str = "gemini-2.5-flash") -> str:
     """Query Google Gemini API."""
     if not GEMINI_API_KEY:
         raise RuntimeError("GEMINI_API_KEY not configured")
-    url = f"https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key={GEMINI_API_KEY}"
+    url = f"https://generativelanguage.googleapis.com/v1beta/models/{model}:generateContent?key={GEMINI_API_KEY}"
     payload = {
         "contents": [{"parts": [{"text": prompt}]}],
         "generationConfig": {"maxOutputTokens": 1024, "temperature": 0.3}
@@ -694,8 +698,8 @@ def query_ai_consensus(prompt: str = "Evaluate swing trading market opportunity 
     )
 
     model_configs = [
-        ("llama-3.3-70b-versatile", "GROQ", lambda: query_groq_api(signal_prompt)),
-        ("gemini-1.5-flash", "GEMINI", lambda: query_gemini_api(signal_prompt)),
+        ("openai/gpt-oss-20b", "GROQ", lambda: query_groq_api(signal_prompt, model="openai/gpt-oss-20b")),
+        ("gemini-2.5-flash", "GEMINI", lambda: query_gemini_api(signal_prompt, model="gemini-2.5-flash")),
         ("deepseek-chat", "DEEPSEEK", lambda: query_deepseek_api(signal_prompt)),
         ("mistral-small", "MISTRAL", lambda: query_mistral_api(signal_prompt)),
         ("openrouter-mistral", "OPENROUTER", lambda: query_openrouter_api(signal_prompt)),
