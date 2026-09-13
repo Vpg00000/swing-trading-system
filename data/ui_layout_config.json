@@ -1,0 +1,24 @@
+{
+  "version": "1.0",
+  "widgets": [
+    {
+      "id": "chart-widget",
+      "title": "Technical Chart Canvas",
+      "visible": true,
+      "order": 0
+    },
+    {
+      "id": "regime-widget",
+      "title": "Market Regime Score",
+      "visible": true,
+      "order": 1
+    },
+    {
+      "id": "risk-widget",
+      "title": "Portfolio Risk",
+      "visible": false,
+      "order": 2
+    }
+  ],
+  "updated_at": "2026-09-13T21:57:02.913487+00:00"
+}
