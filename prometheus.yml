@@ -1,0 +1,24 @@
+# Prometheus Telemetry Metrics Configuration (T-309)
+
+global:
+  scrape_interval: 15s
+  evaluation_interval: 15s
+  scrape_timeout: 10s
+
+scrape_configs:
+  - job_name: 'swing_trading_app'
+    metrics_path: '/metrics'
+    scheme: 'http'
+    static_configs:
+      - targets: ['web:8000']
+        labels:
+          environment: 'production'
+          service: 'fastapi-backend'
+
+  - job_name: 'redis_exporter'
+    static_configs:
+      - targets: ['redis:6379']
+
+  - job_name: 'prometheus'
+    static_configs:
+      - targets: ['localhost:9090']

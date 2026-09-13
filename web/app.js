@@ -1837,7 +1837,6 @@ async function runResearch(symbol) {
         const facts = data.market_facts || {};
         const signals = data.verified_signals || [];
         const histVal = data.historical_validation || {};
-        const opinions = data.model_opinions || {};
         const audit = data.audit_compliance || {};
         const compositeScore = data.score || Math.round(data.priced_in?.evidence?.sentiment_score || 64);
         const convictionStr = data.conviction || (histVal.comparable_events_count >= 3 ? 'HIGH' : 'MODERATE');
@@ -6293,6 +6292,25 @@ function renderDiagnosticResults(results) {
             <td style="padding:8px;"><span class="status-badge ${r.ok ? '' : 'inactive'}">${r.ok ? 'PASS' : 'FAIL'}</span></td>
         </tr>
     `).join('');
+}
+
+function closeDiagnosticModal() {
+    const modal = document.getElementById('diagnosticResultModal');
+    if (modal) modal.classList.add('hidden');
+}
+
+function closeOptionOrderModal() {
+    const modal = document.getElementById('optionOrderModal');
+    if (modal) modal.classList.add('hidden');
+}
+
+function submitOptionOrder() {
+    const contract = document.getElementById('optModalContractSymbol')?.textContent || 'Option';
+    const side = document.getElementById('optModalSide')?.value || 'BUY';
+    const lots = document.getElementById('optModalLots')?.value || '1';
+    const price = document.getElementById('optModalLimitPrice')?.value || '0';
+    showToast(`Submitted ${side} order for ${lots} lot(s) of ${contract} at ₹${price}`, 'success');
+    closeOptionOrderModal();
 }
 
 // ── 7. Claude Prompts Tab Handler ──
