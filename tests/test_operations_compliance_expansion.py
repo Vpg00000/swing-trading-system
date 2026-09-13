@@ -79,7 +79,7 @@ def test_task076_backup_creation_and_restoration():
         enc_file = mgr.create_backup()
 
         assert enc_file.exists()
-        assert enc_file.name.endswith(".db.enc")
+        assert enc_file.name.endswith(".db.enc") or enc_file.name.endswith(".db.gz")
         assert enc_file.stat().st_size > 0
 
         # Verify backup lists

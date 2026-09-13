@@ -47,16 +47,29 @@ class PortfolioManager:
         cash = portfolio_state.get('cash', 0.0)
 
         # Calculate net asset value (NAV)
-        nav = sum(holding['quantity'] * holding['price'] for holding in holdings) + cash
+        nav = sum(holding.get('quantity', 0) * holding.get('price', 0.0) for holding in holdings) + cash
 
         # Calculate total invested value
-        total_invested = sum(trade['quantity'] * trade['price'] for trade in trades)
+        total_invested = sum(trade.get('quantity', 0) * trade.get('price', 0.0) for trade in trades)
 
         # Calculate realized P&L
-        realized_pnl = sum(trade['quantity'] * (trade['price'] - trade['average_price']) for trade in trades)
+        realized_pnl = sum(trade.get('quantity', 0) * (trade.get('price', 0.0) - trade.get('average_price', 0.0)) for trade in trades)
 
         # Calculate unrealized P&L
-        unrealized_pnl = sum((holding['quantity'] - sum(trade['quantity'] for trade in trades if trade['symbol'] == holding['symbol'])) * (holding['price'] - trade['average_price']) for holding in holdings for trade in trades if trade['symbol'] == holding['symbol'])
+        unrealized_pnl = 0.0
+        for holding in holdings:
+            h_sym = holding.get('symbol')
+            h_qty = holding.get('quantity', 0)
+            h_price = holding.get('price', 0.0)
+            matching_trades = [t for t in trades if t.get('symbol') == h_sym]
+            if matching_trades:
+                traded_qty = sum(t.get('quantity', 0) for t in matching_trades)
+                avg_trade_price = sum(t.get('quantity', 0) * t.get('average_price', t.get('price', 0.0)) for t in matching_trades) / traded_qty if traded_qty > 0 else h_price
+                unrealized_pnl += (h_qty - traded_qty) * (h_price - avg_trade_price)
+            else:
+                cost_p = holding.get('cost_price', holding.get('average_price', h_price))
+                unrealized_pnl += h_qty * (h_price - cost_p)
+
 
         # Calculate position drift
         position_drift = sum(abs(position['quantity'] - sum(trade['quantity'] for trade in trades if trade['symbol'] == position['symbol'])) for position in positions)

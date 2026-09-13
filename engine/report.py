@@ -209,7 +209,10 @@ def generate_report_data(save_prompts: bool = False) -> dict:
 
     # Money Flow Details
     money_flow_symbols = sorted(top_symbol_set)
-    bare_symbols = [s.replace(".NS", "").upper() for s in money_flow_symbols]
+    # Note: NSE shareholding & pledge lookup requires 2-3 synchronous XBRL queries per symbol.
+    # To prevent multi-minute HTTP timeouts across 500 stocks, prioritize portfolio holdings + top 20 candidates.
+    priority_candidates = {c.symbol for c in ranked[:20]} | held_symbols
+    priority_bare_symbols = [s.replace(".NS", "").upper() for s in priority_candidates]
     
     try:
         all_insider = insider_trades_for_universe(money_flow_symbols, lookback_days=90)
@@ -224,14 +227,14 @@ def generate_report_data(save_prompts: bool = False) -> dict:
         data_health["Bulk/block deals API"] = f"FAILED: {exc}"
         
     try:
-        pledges_list = pledge_status_for_symbols(bare_symbols)
+        pledges_list = pledge_status_for_symbols(priority_bare_symbols)
         pledges = {p.symbol: p for p in pledges_list}
     except Exception as exc:
         pledges = {}
         data_health["Pledges/XBRL"] = f"FAILED: {exc}"
         
     try:
-        ownerships_list = shareholding_for_symbols(bare_symbols)
+        ownerships_list = shareholding_for_symbols(priority_bare_symbols)
         ownerships = {o.symbol: o for o in ownerships_list}
     except Exception as exc:
         ownerships = {}

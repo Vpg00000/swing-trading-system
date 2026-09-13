@@ -222,11 +222,33 @@ def hash_password(password: str, salt: Optional[bytes] = None) -> Tuple[str, str
     return hashed.hex(), salt.hex()
 
 
-def verify_password(password: str, password_hash: str, salt_hex: str) -> bool:
+def verify_password(password: str, password_hash: str, salt_hex: Optional[str] = None) -> bool:
     """Verifies a plain text password against a stored PBKDF2 hash and salt."""
-    salt = bytes.fromhex(salt_hex)
-    computed_hash, _ = hash_password(password, salt)
-    return hmac.compare_digest(computed_hash, password_hash)
+    if not password or not password_hash:
+        return False
+    if salt_hex:
+        try:
+            salt = bytes.fromhex(salt_hex)
+            computed_hash, _ = hash_password(password, salt)
+            return hmac.compare_digest(computed_hash, password_hash)
+        except Exception:
+            return False
+    elif ":" in password_hash:
+        try:
+            parts = password_hash.split(":", 1)
+            salt_hex_val = parts[0]
+            hash_val = parts[1]
+            salt = bytes.fromhex(salt_hex_val)
+            computed_hash, _ = hash_password(password, salt)
+            return hmac.compare_digest(computed_hash, hash_val)
+        except Exception:
+            return False
+    else:
+        try:
+            computed = hashlib.sha256(password.encode("utf-8")).hexdigest()
+            return hmac.compare_digest(computed, password_hash)
+        except Exception:
+            return False
 
 
 def generate_totp_secret() -> str:
@@ -280,6 +302,11 @@ def verify_totp_token(secret: str, token: str, valid_window: int = 1) -> bool:
             return False
 
 
+def verify_totp_code(secret: str, code: str, valid_window: int = 1) -> bool:
+    """Alias for verify_totp_token to verify a 6-digit TOTP code."""
+    return verify_totp_token(secret, code, valid_window=valid_window)
+
+
 def _b64url_encode(data: bytes) -> str:
     return base64.urlsafe_b64encode(data).rstrip(b'=').decode('utf-8')
 
@@ -289,22 +316,31 @@ def _b64url_decode(data_str: str) -> bytes:
     return base64.urlsafe_b64encode(data_str.encode('utf-8') + padding.encode('utf-8'))
 
 
-def create_jwt_token(payload: dict, secret_key: str = SECRET_KEY, expires_in_seconds: int = 3600) -> str:
+def create_jwt_token(
+    payload: dict,
+    secret_key: str = SECRET_KEY,
+    expires_minutes: int = 60,
+    expires_in_seconds: Optional[int] = None
+) -> str:
     """Encodes a JWT access token with payload, exp timestamp, and HS256 signature."""
+    if expires_in_seconds is not None:
+        ttl_seconds = expires_in_seconds
+    else:
+        ttl_seconds = expires_minutes * 60
+
+    token_payload = payload.copy()
+    now = int(time.time())
+    if "iat" not in token_payload:
+        token_payload["iat"] = now
+    if "exp" not in token_payload:
+        token_payload["exp"] = now + ttl_seconds
+
     try:
         import jwt
-        token_payload = payload.copy()
-        now = int(time.time())
-        token_payload["iat"] = now
-        token_payload["exp"] = now + expires_in_seconds
         return jwt.encode(token_payload, secret_key, algorithm="HS256")
     except ImportError:
         # Pure-Python JWT encoder fallback
         header = {"alg": "HS256", "typ": "JWT"}
-        token_payload = payload.copy()
-        now = int(time.time())
-        token_payload["iat"] = now
-        token_payload["exp"] = now + expires_in_seconds
 
         header_json = json.dumps(header, separators=(',', ':')).encode('utf-8')
         payload_json = json.dumps(token_payload, separators=(',', ':')).encode('utf-8')
@@ -375,7 +411,7 @@ def register_user(
     role: str = UserRole.VIEWER,
     totp_secret: Optional[str] = None
 ) -> Dict[str, Any]:
-    """Registers a new user account with hashed password and RBAC role."""
+    """Registers a new user account or updates an existing account with hashed password and RBAC role."""
     init_user_db()
     username_clean = username.strip().lower()
     role_clean = role.strip().upper()
@@ -391,10 +427,18 @@ def register_user(
             """
             INSERT INTO users (username, password_hash, salt, role, totp_secret, is_2fa_enabled)
             VALUES (?, ?, ?, ?, ?, 1)
+            ON CONFLICT(username) DO UPDATE SET
+                password_hash=excluded.password_hash,
+                salt=excluded.salt,
+                role=excluded.role,
+                totp_secret=excluded.totp_secret,
+                is_2fa_enabled=1
             """,
             (username_clean, p_hash, salt_hex, role_clean, totp_sec)
         )
-        user_id = cursor.lastrowid
+        cursor.execute("SELECT id FROM users WHERE username = ?", (username_clean,))
+        row = cursor.fetchone()
+        user_id = row[0] if row else cursor.lastrowid
 
     log_audit_event("USER_REGISTRATION", {"username": username_clean, "role": role_clean})
     return {
@@ -407,8 +451,8 @@ def register_user(
     }
 
 
-def authenticate_user(username: str, password: str) -> Optional[Dict[str, Any]]:
-    """Authenticates username and password against stored PBKDF2 hash."""
+def get_user_by_username(username: str) -> Optional[Dict[str, Any]]:
+    """Retrieves user profile dictionary by username."""
     init_user_db()
     username_clean = username.strip().lower()
     with sqlite3.connect(DB_PATH) as conn:
@@ -423,15 +467,44 @@ def authenticate_user(username: str, password: str) -> Optional[Dict[str, Any]]:
         return None
 
     user_id, uname, p_hash, salt_hex, role, totp_sec, is_2fa = row
-    if verify_password(password, p_hash, salt_hex):
+    return {
+        "id": user_id,
+        "username": uname,
+        "password_hash": p_hash,
+        "salt": salt_hex,
+        "role": role,
+        "totp_secret": totp_sec,
+        "is_2fa_enabled": bool(is_2fa),
+        "permissions": list(ROLE_PERMISSIONS.get(role, set()))
+    }
+
+
+def authenticate_user(username: str, password: str) -> Optional[Dict[str, Any]]:
+    """Authenticates username and password against stored PBKDF2 hash."""
+    user = get_user_by_username(username)
+    if not user:
+        return None
+
+    if verify_password(password, user["password_hash"], user["salt"]):
         return {
-            "id": user_id,
-            "username": uname,
-            "role": role,
-            "totp_secret": totp_sec,
-            "is_2fa_enabled": bool(is_2fa)
+            "id": user["id"],
+            "username": user["username"],
+            "role": user["role"],
+            "totp_secret": user["totp_secret"],
+            "is_2fa_enabled": user["is_2fa_enabled"],
+            "permissions": user["permissions"]
         }
     return None
+
+
+def verify_2fa(username: str, code: str) -> bool:
+    """Verifies a user's 2FA TOTP code."""
+    if not username or not code:
+        return False
+    user = get_user_by_username(username)
+    if not user or not user.get("totp_secret"):
+        return False
+    return verify_totp_code(user["totp_secret"], code)
 
 
 def login_user(username: str, password: str, totp_token: Optional[str] = None) -> Dict[str, Any]:
@@ -471,6 +544,70 @@ def login_user(username: str, password: str, totp_token: Optional[str] = None) -
             "permissions": list(ROLE_PERMISSIONS.get(user["role"], set()))
         }
     }
+
+
+class AuthManager:
+    """AuthManager for multi-user access control, password hashing, JWT tokens, and TOTP 2FA."""
+
+    @staticmethod
+    def hash_password(password: str, salt: Optional[bytes] = None) -> str:
+        """Hashes password and returns 'salt_hex:hash_hex' or (hash, salt) if salt passed."""
+        if salt is not None:
+            p_hash, salt_hex = hash_password(password, salt=salt)
+            return f"{salt_hex}:{p_hash}"
+        p_hash, salt_hex = hash_password(password)
+        return f"{salt_hex}:{p_hash}"
+
+    @staticmethod
+    def verify_password(password: str, password_hash: str, salt_hex: Optional[str] = None) -> bool:
+        """Verifies password against stored hash."""
+        return verify_password(password, password_hash, salt_hex)
+
+    @staticmethod
+    def create_jwt_token(payload: dict, expires_minutes: int = 60, secret_key: str = SECRET_KEY) -> str:
+        """Creates JWT token with expiration in minutes."""
+        return create_jwt_token(payload, secret_key=secret_key, expires_minutes=expires_minutes)
+
+    @staticmethod
+    def decode_jwt_token(token: str, secret_key: str = SECRET_KEY) -> dict:
+        """Decodes JWT token."""
+        return decode_jwt_token(token, secret_key=secret_key)
+
+    @staticmethod
+    def generate_totp_secret() -> str:
+        """Generates random Base32 TOTP secret."""
+        return generate_totp_secret()
+
+    @staticmethod
+    def verify_totp_code(secret: str, code: str, valid_window: int = 1) -> bool:
+        """Verifies TOTP code."""
+        return verify_totp_code(secret, code, valid_window=valid_window)
+
+    @staticmethod
+    def authenticate_user(username: str, password: str) -> Optional[Dict[str, Any]]:
+        """Authenticates user with username and password."""
+        return authenticate_user(username, password)
+
+    @staticmethod
+    def verify_2fa(username: str, code: str) -> bool:
+        """Verifies 2FA TOTP code for given username."""
+        return verify_2fa(username, code)
+
+    @staticmethod
+    def get_user_by_username(username: str) -> Optional[Dict[str, Any]]:
+        """Gets user context by username."""
+        return get_user_by_username(username)
+
+    @staticmethod
+    def register_user(
+        username: str,
+        password: str,
+        role: str = UserRole.VIEWER,
+        totp_secret: Optional[str] = None
+    ) -> Dict[str, Any]:
+        """Registers user account."""
+        return register_user(username, password, role=role, totp_secret=totp_secret)
+
 
 
 # ── TASK-079: Append-Only SHA-256 Hashed SEBI Audit Trail Logger ───────────────
@@ -616,6 +753,160 @@ def verify_sebi_audit_chain() -> Tuple[bool, List[Dict[str, Any]]]:
     return is_valid, errors
 
 
+class SEBIAuditLogger:
+    """
+    Append-Only SHA-256 Hashed Audit Trail Logger for SEBI Compliance.
+    Stores entries in SQLite table 'sebi_audit_trail'.
+    Each entry consists of: id, timestamp, action, user_id, details_json, previous_hash, current_hash.
+    """
+
+    def __init__(self, db_path: Optional[Union[str, Path]] = None):
+        self.db_path = Path(db_path) if db_path else DB_PATH
+        self._init_db()
+
+    def _init_db(self):
+        self.db_path.parent.mkdir(parents=True, exist_ok=True)
+        with sqlite3.connect(self.db_path) as conn:
+            conn.execute("""
+                CREATE TABLE IF NOT EXISTS sebi_audit_trail (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    timestamp TEXT NOT NULL,
+                    action TEXT NOT NULL,
+                    user_id TEXT NOT NULL,
+                    details_json TEXT NOT NULL,
+                    previous_hash TEXT NOT NULL,
+                    current_hash TEXT NOT NULL
+                )
+            """)
+
+    def _compute_hash(
+        self,
+        entry_id: int,
+        timestamp: str,
+        action: str,
+        user_id: str,
+        details_json: str,
+        previous_hash: str
+    ) -> str:
+        """
+        Computes SHA-256 current_hash = SHA-256(id + timestamp + action + user_id + details_json + previous_hash)
+        """
+        payload = f"{entry_id}{timestamp}{action}{user_id}{details_json}{previous_hash}"
+        return hashlib.sha256(payload.encode("utf-8")).hexdigest()
+
+    def log(self, action: str, user_id: str, details: Any) -> Dict[str, Any]:
+        """Appends an immutable audit log record to sebi_audit_trail."""
+        redacted_details = redact_secrets(details)
+        if isinstance(redacted_details, (dict, list)):
+            details_json = json.dumps(redacted_details, sort_keys=True)
+        elif isinstance(redacted_details, str):
+            details_json = redacted_details
+        else:
+            details_json = json.dumps(redacted_details)
+
+        timestamp = datetime.datetime.now(datetime.timezone.utc).strftime("%Y-%m-%d %H:%M:%S")
+
+        with sqlite3.connect(self.db_path) as conn:
+            cursor = conn.cursor()
+            cursor.execute("SELECT id, current_hash FROM sebi_audit_trail ORDER BY id DESC LIMIT 1")
+            last_row = cursor.fetchone()
+
+            if last_row:
+                next_id = last_row[0] + 1
+                previous_hash = last_row[1]
+            else:
+                next_id = 1
+                previous_hash = "0" * 64
+
+            current_hash = self._compute_hash(
+                entry_id=next_id,
+                timestamp=timestamp,
+                action=action,
+                user_id=str(user_id),
+                details_json=details_json,
+                previous_hash=previous_hash
+            )
+
+            cursor.execute(
+                """
+                INSERT INTO sebi_audit_trail (id, timestamp, action, user_id, details_json, previous_hash, current_hash)
+                VALUES (?, ?, ?, ?, ?, ?, ?)
+                """,
+                (next_id, timestamp, action, str(user_id), details_json, previous_hash, current_hash)
+            )
+
+        return {
+            "id": next_id,
+            "timestamp": timestamp,
+            "action": action,
+            "user_id": str(user_id),
+            "details_json": details_json,
+            "previous_hash": previous_hash,
+            "current_hash": current_hash
+        }
+
+    def verify_integrity(self) -> bool:
+        """
+        Verifies the integrity of all records in sebi_audit_trail.
+        Returns True if no records have been tampered with, else False.
+        """
+        with sqlite3.connect(self.db_path) as conn:
+            conn.row_factory = sqlite3.Row
+            cursor = conn.cursor()
+            cursor.execute(
+                "SELECT id, timestamp, action, user_id, details_json, previous_hash, current_hash "
+                "FROM sebi_audit_trail ORDER BY id ASC"
+            )
+            rows = cursor.fetchall()
+
+        expected_prev_hash = "0" * 64
+        for row in rows:
+            r_id = row["id"]
+            r_ts = row["timestamp"]
+            r_action = row["action"]
+            r_user_id = row["user_id"]
+            r_details = row["details_json"]
+            r_prev = row["previous_hash"]
+            r_curr = row["current_hash"]
+
+            if r_prev != expected_prev_hash:
+                return False
+
+            computed = self._compute_hash(
+                entry_id=r_id,
+                timestamp=r_ts,
+                action=r_action,
+                user_id=r_user_id,
+                details_json=r_details,
+                previous_hash=r_prev
+            )
+
+            if computed != r_curr:
+                return False
+
+            expected_prev_hash = r_curr
+
+        return True
+
+    def get_logs(self, limit: int = 100) -> List[Dict[str, Any]]:
+        """Retrieves recent audit trail entries."""
+        with sqlite3.connect(self.db_path) as conn:
+            conn.row_factory = sqlite3.Row
+            cursor = conn.cursor()
+            cursor.execute(
+                "SELECT id, timestamp, action, user_id, details_json, previous_hash, current_hash "
+                "FROM sebi_audit_trail ORDER BY id DESC LIMIT ?",
+                (limit,)
+            )
+            return [dict(r) for r in cursor.fetchall()]
+
+
+def log_sebi_audit(action: str, user_id: str, details: Any, db_path: Optional[Union[str, Path]] = None) -> Dict[str, Any]:
+    """Helper function to log a SEBI audit event."""
+    logger = SEBIAuditLogger(db_path=db_path)
+    return logger.log(action, user_id, details)
+
+
 if __name__ == "__main__":
     print("Testing Security, Auth & SEBI Compliance Module...\n")
     enc = encrypt_api_secret("dhan_live_secret_12345")
@@ -635,3 +926,8 @@ if __name__ == "__main__":
 
     is_valid, errs = verify_sebi_audit_chain()
     print(f"  SEBI Audit Trail Chain Valid: {is_valid}")
+
+    sebi_log_entry = log_sebi_audit("TRADE_EXECUTED", "USER_1", {"symbol": "INFY.NS", "qty": 50})
+    print(f"  SEBIAuditLogger Entry #{sebi_log_entry['id']} Hash: {sebi_log_entry['current_hash'][:16]}...")
+    logger = SEBIAuditLogger()
+    print(f"  SEBIAuditLogger Integrity: {logger.verify_integrity()}")

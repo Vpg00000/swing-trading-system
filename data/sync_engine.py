@@ -14,8 +14,9 @@ Usage:
 import logging
 import sys
 import time
-from datetime import date
+from datetime import date, datetime, timedelta
 from pathlib import Path
+from typing import List, Dict, Any, Optional
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 from config.universe import EQUITY_UNIVERSE
@@ -28,11 +29,10 @@ from engine.valuation import compute_valuation_score
 from engine.relative_strength import compute_rs_score
 from engine.expected_return import compute_expected_return
 from engine.net_alpha import calculate_net_alpha
-from data.database import upsert_stock_metrics, init_db
+from data.database import upsert_stock_metrics, init_db, get_connection
 
 log = logging.getLogger(__name__)
 logging.basicConfig(level=logging.INFO, format="%(levelname)s  %(message)s")
-
 
 def run_full_sync(symbols: list[str] | None = None) -> dict:
     """
@@ -55,7 +55,10 @@ def run_full_sync(symbols: list[str] | None = None) -> dict:
     tech_map = compute_all(symbols)
 
     records = []
-    for sym in symbols:
+    for idx, sym in enumerate(symbols, 1):
+        if idx % 50 == 0 or idx == 1 or idx == len(symbols):
+            log.info(f"Progress [{idx}/{len(symbols)}]: Syncing stock metrics for {sym}...")
+            sys.stdout.flush()
         tech = tech_map.get(sym)
         if not tech or (not tech.sufficient_data and tech.data_rows < 10):
             continue
@@ -145,19 +148,11 @@ def run_full_sync(symbols: list[str] | None = None) -> dict:
     log.info(f"✓ One-Click Sync Complete! Processed {len(records)} stocks in {elapsed}s.")
     return {"status": "SUCCESS", "records_updated": len(records), "elapsed_seconds": elapsed}
 
-
 def get_current_market_data(symbol: str) -> dict:
     """Fetch current market snapshot for symbol."""
     return {"symbol": symbol, "move_pct": 0.0, "price": 100.0, "volume": 100000}
 
-
 # ── TASK-054: Data Quality Backfill and Gap Filler Worker ────────
-
-import datetime
-from typing import List, Dict, Any, Optional
-from data.database import get_connection, init_db
-
-
 def detect_candle_gaps(
     symbol: str,
     timeframe: str = "1d",
@@ -178,8 +173,8 @@ def detect_candle_gaps(
     gaps = []
     if not rows:
         # DB has no data at all for this symbol/timeframe -> entire period is a gap
-        now = datetime.datetime.now(datetime.timezone.utc)
-        s_date = start_date or (now - datetime.timedelta(days=30)).strftime("%Y-%m-%d")
+        now = datetime.now(datetime.timezone.utc)
+        s_date = start_date or (now - timedelta(days=30)).strftime("%Y-%m-%d")
         e_date = end_date or now.strftime("%Y-%m-%d")
         gaps.append({
             "symbol": symbol,
@@ -195,8 +190,8 @@ def detect_candle_gaps(
     dates = [r["timestamp"] for r in rows]
     for i in range(len(dates) - 1):
         try:
-            d1 = datetime.datetime.fromisoformat(dates[i])
-            d2 = datetime.datetime.fromisoformat(dates[i + 1])
+            d1 = datetime.fromisoformat(dates[i])
+            d2 = datetime.fromisoformat(dates[i + 1])
             diff_hours = (d2 - d1).total_seconds() / 3600.0
 
             # For 1d candles: gap if > 4 days (accounting for weekend)
@@ -215,7 +210,6 @@ def detect_candle_gaps(
             continue
 
     return gaps
-
 
 def backfill_gaps(
     symbol: str,
@@ -241,18 +235,18 @@ def backfill_gaps(
 
             # Generate synthetic / fetched backfill candles to fill the missing gap
             try:
-                s_dt = datetime.datetime.fromisoformat(s_str)
+                s_dt = datetime.fromisoformat(s_str)
             except Exception:
-                s_dt = datetime.datetime.now(datetime.timezone.utc) - datetime.timedelta(days=10)
+                s_dt = datetime.now(datetime.timezone.utc) - timedelta(days=10)
 
             try:
-                e_dt = datetime.datetime.fromisoformat(e_str)
+                e_dt = datetime.fromisoformat(e_str)
             except Exception:
-                e_dt = datetime.datetime.now(datetime.timezone.utc)
+                e_dt = datetime.now(datetime.timezone.utc)
 
             curr = s_dt
             base_price = 500.0
-            step = datetime.timedelta(days=1) if tf == "1d" else datetime.timedelta(minutes=1)
+            step = timedelta(days=1) if tf == "1d" else timedelta(minutes=1)
 
             while curr <= e_dt:
                 ts_iso = curr.strftime("%Y-%m-%d %H:%M:%S") if tf == "1m" else curr.strftime("%Y-%m-%d")
@@ -279,7 +273,6 @@ def backfill_gaps(
         "source": source,
         "status": "COMPLETED"
     }
-
 
 def run_gap_filler_worker(
     symbols: Optional[List[str]] = None,
@@ -320,7 +313,6 @@ def run_gap_filler_worker(
         "elapsed_seconds": elapsed,
         "details": symbol_reports
     }
-
 
 if __name__ == "__main__":
     print("Testing One-Click Sync Engine on a universe sample (20 stocks)...")

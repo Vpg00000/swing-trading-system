@@ -34,7 +34,7 @@ class FundamentalScore:
     cashflow_score: float        # /20
     total_score: float           # /100
     # Data quality
-    status: str  # 'SCORED', 'PARTIAL_DATA', 'DATA_UNAVAILABLE'
+    status: str  # 'SCORED', 'PARTIAL_DATA', 'DATA_UNAVAILABLE', 'STALE_CACHED_DATA'
     missing_fields: list[str]
     # Raw inputs used
     roce: Optional[float]
@@ -43,6 +43,9 @@ class FundamentalScore:
     debt_to_equity: Optional[float]
     sales_growth: Optional[float]
     profit_growth: Optional[float]
+    stale: bool = False
+    stale_flag: bool = False
+
 
 
 def _score_roce(roce: Optional[float]) -> float:
@@ -185,10 +188,17 @@ def compute_fundamental_score(screener: ScreenerData) -> FundamentalScore:
     total = profitability_35 + growth_25 + strength_20 + cashflow_20
     total = round(max(0.0, min(100.0, total)), 1)
 
-    # Status
+    # Status & Stale flags
     n_missing = len(set(missing))  # unique missing fields
+    stale = False
+    stale_flag = False
     if screener.data_source == "UNAVAILABLE":
-        status = "DATA_UNAVAILABLE"
+        stale = True
+        stale_flag = True
+        if n_missing < 6:
+            status = "STALE_CACHED_DATA"
+        else:
+            status = "DATA_UNAVAILABLE"
     elif n_missing >= 4:
         status = "PARTIAL_DATA"
     else:
@@ -209,6 +219,8 @@ def compute_fundamental_score(screener: ScreenerData) -> FundamentalScore:
         debt_to_equity=screener.debt_to_equity,
         sales_growth=screener.sales_growth_3yr,
         profit_growth=screener.profit_growth_3yr,
+        stale=stale,
+        stale_flag=stale_flag,
     )
 
 

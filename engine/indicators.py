@@ -159,11 +159,18 @@ def _ema(series: pd.Series, span: int) -> pd.Series:
     return series.ewm(span=span, adjust=False).mean()
 
 
+def _rma(series: pd.Series, period: int) -> pd.Series:
+    """Calculate Wilder's RMA (Running Moving Average)"""
+    return series.ewm(alpha=1/period, adjust=False).mean()
+
+
 def _rsi(close: pd.Series, period: int = 14) -> pd.Series:
     delta = close.diff()
-    gain = delta.clip(lower=0).rolling(period).mean()
-    loss = (-delta.clip(upper=0)).rolling(period).mean()
-    rs = gain / loss.replace(0, np.nan)
+    gain = delta.clip(lower=0)
+    loss = -delta.clip(upper=0)
+    avg_gain = _rma(gain, period)
+    avg_loss = _rma(loss, period)
+    rs = avg_gain / avg_loss.replace(0, np.nan)
     return 100 - (100 / (1 + rs))
 
 
@@ -199,7 +206,7 @@ def _atr(df: pd.DataFrame, period=14) -> pd.Series:
         (high - prev_close).abs(),
         (low - prev_close).abs(),
     ], axis=1).max(axis=1)
-    return tr.rolling(period).mean()
+    return _rma(tr, period)
 
 
 def _detect_hammer(o, h, l, c) -> bool:
