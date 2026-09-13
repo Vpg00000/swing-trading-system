@@ -586,3 +586,85 @@ def evaluate_full_portfolio_risk(
         "circuit_breaker": circuit_breaker_res,
         "margin_deleverage": margin_res
     }
+
+
+def validate_intraday_short_entry(
+    symbol: str,
+    current_time_str: Optional[str] = None,
+    user_confirmed_watching: bool = False,
+    is_fno_eligible: bool = True,
+    momentum_rank_bottom_tier: bool = True,
+    has_negative_catalyst: bool = True,
+    entry_price: float = 0.0,
+    atr: float = 0.0,
+    capital: float = 1000000.0,
+    requested_size_pct: float = 0.04
+) -> Dict[str, Any]:
+    """
+    Enforces all 8 rules for intraday short-selling per DESIGN.md L99-111 & ISSUES_AND_IMPROVEMENTS.md:
+      1. User confirmation they have time to watch live (NOT automated)
+      2. Momentum rank in bottom tier + confirmed negative catalyst
+      3. Stock on F&O-eligible / high-liquidity list
+      4. Entry ONLY before 1:30 PM IST
+      5. Stop-loss = 2x ATR ABOVE entry
+      6. Position size 3-5% hard limit
+      7. Hard close / square-off by 3:15 PM regardless of P&L
+      8. Never average down
+    """
+    rejection_reasons = []
+
+    if not user_confirmed_watching:
+        rejection_reasons.append("User has not confirmed availability to actively monitor intraday short trade.")
+
+    if not is_fno_eligible:
+        rejection_reasons.append(f"{symbol} is not F&O-eligible / high-liquidity.")
+
+    if not (momentum_rank_bottom_tier and has_negative_catalyst):
+        rejection_reasons.append("Short candidates require both bottom-tier momentum and confirmed negative catalyst.")
+
+    # Time check (entry allowed only before 13:30 IST)
+    time_str = current_time_str or datetime.now().strftime("%H:%M")
+    if time_str > "13:30":
+        rejection_reasons.append(f"Short entry rejected at {time_str} IST: must enter before 1:30 PM IST.")
+
+    # Size cap (3-5% hard cap)
+    capped_size_pct = min(0.05, max(0.03, requested_size_pct))
+    if requested_size_pct > 0.05:
+        rejection_reasons.append(f"Requested position size {requested_size_pct*100:.1f}% exceeds 5% maximum intraday short limit.")
+
+    stop_loss_price = round(entry_price + 2.0 * atr, 2) if (entry_price > 0 and atr > 0) else 0.0
+    allowed_size_inr = round(capital * capped_size_pct, 2)
+
+    is_allowed = len(rejection_reasons) == 0
+
+    return {
+        "symbol": symbol,
+        "is_short_entry_allowed": is_allowed,
+        "status": "APPROVED" if is_allowed else "REJECTED",
+        "rejection_reasons": rejection_reasons,
+        "entry_time": time_str,
+        "stop_loss_price": stop_loss_price,
+        "max_size_pct": 5.0,
+        "approved_size_pct": round(capped_size_pct * 100.0, 1),
+        "approved_size_inr": allowed_size_inr,
+        "mandatory_square_off_time": "15:15 IST",
+        "average_down_allowed": False
+    }
+
+
+def check_intraday_short_square_off(current_time_str: Optional[str] = None) -> Dict[str, Any]:
+    """
+    Checks whether intraday short positions must be forcibly closed (3:15 PM IST cutoff).
+    Prevents overnight naked short positions and unlimited auction penalty risk.
+    """
+    time_str = current_time_str or datetime.now().strftime("%H:%M")
+    is_square_off = time_str >= "15:15"
+
+    return {
+        "current_time": time_str,
+        "cutoff_time": "15:15",
+        "force_square_off": is_square_off,
+        "action": "AUTO_CLOSE_ALL_INTRADAY_SHORTS" if is_square_off else "HOLD_INTRADAY",
+        "warning": "CRITICAL: 3:15 PM square-off reached! Liquidate all short trades now." if is_square_off else None
+    }
+

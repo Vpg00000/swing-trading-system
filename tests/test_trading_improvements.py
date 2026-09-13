@@ -12,7 +12,11 @@ import numpy as np
 import pandas as pd
 from fastapi.testclient import TestClient
 
-from engine.risk_engine import check_circuit_proximity
+from engine.risk_engine import (
+    check_circuit_proximity,
+    validate_intraday_short_entry,
+    check_intraday_short_square_off
+)
 from engine.decision import evaluate_decision, classify_action
 from engine.momentum import (
     compute_volume_weighted_momentum,
@@ -197,3 +201,55 @@ def test_web_server_backtest_endpoints():
     r3 = client.get("/api/backtest/optimize")
     assert r3.status_code == 200
     assert r3.json()["status"] == "SUCCESS"
+
+
+def test_intraday_short_enforcement():
+    # 1. Valid short entry before 1:30 PM with active watch confirmation
+    valid_short = validate_intraday_short_entry(
+        symbol="TATASTEEL.NS",
+        current_time_str="11:45",
+        user_confirmed_watching=True,
+        is_fno_eligible=True,
+        momentum_rank_bottom_tier=True,
+        has_negative_catalyst=True,
+        entry_price=150.0,
+        atr=3.0,
+        capital=1000000.0,
+        requested_size_pct=0.04
+    )
+    assert valid_short["is_short_entry_allowed"]
+    assert valid_short["status"] == "APPROVED"
+    assert valid_short["stop_loss_price"] == 156.0  # entry + 2x ATR
+
+    # 2. Rejection if user did not confirm watching
+    unwatched = validate_intraday_short_entry(
+        symbol="TATASTEEL.NS",
+        current_time_str="11:45",
+        user_confirmed_watching=False,
+        is_fno_eligible=True,
+        momentum_rank_bottom_tier=True,
+        has_negative_catalyst=True
+    )
+    assert not unwatched["is_short_entry_allowed"]
+    assert any("monitor" in r for r in unwatched["rejection_reasons"])
+
+    # 3. Rejection if entered after 1:30 PM IST (e.g. 14:00)
+    late_short = validate_intraday_short_entry(
+        symbol="TATASTEEL.NS",
+        current_time_str="14:00",
+        user_confirmed_watching=True,
+        is_fno_eligible=True,
+        momentum_rank_bottom_tier=True,
+        has_negative_catalyst=True
+    )
+    assert not late_short["is_short_entry_allowed"]
+    assert any("1:30 PM" in r for r in late_short["rejection_reasons"])
+
+    # 4. Mandatory square-off at 3:15 PM IST
+    midday = check_intraday_short_square_off("13:00")
+    assert not midday["force_square_off"]
+
+    cutoff = check_intraday_short_square_off("15:20")
+    assert cutoff["force_square_off"]
+    assert cutoff["action"] == "AUTO_CLOSE_ALL_INTRADAY_SHORTS"
+
