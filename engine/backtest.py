@@ -2245,6 +2245,323 @@ def run_standard_momentum_backtest(
     return metrics
 
 
+def calculate_market_impact(
+    position_size_inr: float,
+    avg_daily_volume_inr: float,
+    direction: str = 'buy'
+) -> float:
+    """
+    Position size as % of daily liquidity determines market impact in basis points.
+    Formula from CODE_REVIEW_COMPREHENSIVE.md:
+        participation_ratio = position_size_inr / avg_daily_volume_inr
+        If participation_ratio > 0.10: (participation_ratio ** 0.5) * 50 bps
+        Elif participation_ratio > 0.05: participation_ratio * 25 bps
+        Else: 5 bps minimal
+    """
+    if avg_daily_volume_inr <= 0:
+        return 50.0
+    participation_ratio = position_size_inr / avg_daily_volume_inr
+    if participation_ratio > 0.10:
+        impact_bps = (participation_ratio ** 0.5) * 50.0
+    elif participation_ratio > 0.05:
+        impact_bps = participation_ratio * 25.0
+    else:
+        impact_bps = 5.0
+    return round(float(impact_bps), 2)
+
+
+def monte_carlo_with_correlation(
+    portfolio_returns: Union[Dict[str, List[float]], pd.DataFrame, np.ndarray],
+    sector_corr_matrix: Optional[np.ndarray] = None,
+    n_sims: int = 1000,
+    n_days: int = 252,
+    initial_capital: float = 1000000.0
+) -> Dict[str, Any]:
+    """
+    Generate correlated return paths by sector using Cholesky decomposition.
+    Prevents underestimating portfolio tail-risk when holding correlated names.
+    """
+    from scipy.linalg import cholesky
+
+    # Prepare return matrix and asset statistics
+    if isinstance(portfolio_returns, pd.DataFrame):
+        symbols = list(portfolio_returns.columns)
+        ret_matrix = portfolio_returns.values
+    elif isinstance(portfolio_returns, dict):
+        symbols = list(portfolio_returns.keys())
+        ret_matrix = np.array([portfolio_returns[s] for s in symbols]).T
+    else:
+        ret_matrix = np.asarray(portfolio_returns)
+        symbols = [f"asset_{i}" for i in range(ret_matrix.shape[1])]
+
+    n_assets = ret_matrix.shape[1]
+    if n_assets == 0:
+        return {"error": "Empty portfolio returns provided"}
+
+    means = np.nanmean(ret_matrix, axis=0)
+    means = np.nan_to_num(means, nan=0.0004)
+    vols = np.nanstd(ret_matrix, axis=0)
+    vols = np.nan_to_num(vols, nan=0.015)
+    vols = np.maximum(vols, 0.001)
+
+    if sector_corr_matrix is not None and sector_corr_matrix.shape == (n_assets, n_assets):
+        corr = np.array(sector_corr_matrix, dtype=float)
+    else:
+        clean_df = pd.DataFrame(ret_matrix).dropna()
+        if len(clean_df) > 5:
+            corr = clean_df.corr().values
+        else:
+            corr = np.eye(n_assets)
+        corr = np.nan_to_num(corr, nan=0.0)
+        np.fill_diagonal(corr, 1.0)
+
+    # Ensure positive semi-definiteness for Cholesky
+    corr = (corr + corr.T) / 2.0
+    min_eig = np.min(np.real(np.linalg.eigvals(corr)))
+    if min_eig < 1e-6:
+        corr += (1e-5 - min_eig) * np.eye(n_assets)
+
+    try:
+        L = cholesky(corr, lower=True)
+    except Exception:
+        L = np.eye(n_assets)
+
+    sim_final_equity = []
+    sim_max_drawdowns = []
+
+    weights = np.ones(n_assets) / n_assets
+
+    for _ in range(n_sims):
+        Z = np.random.normal(0, 1, (n_assets, n_days))
+        Y = L @ Z
+        asset_daily_rets = means[:, None] + vols[:, None] * Y
+        port_daily_rets = weights @ asset_daily_rets
+
+        cum_ret = np.cumprod(1.0 + port_daily_rets)
+        equity_curve = initial_capital * np.insert(cum_ret, 0, 1.0)
+        sim_final_equity.append(equity_curve[-1])
+
+        peaks = np.maximum.accumulate(equity_curve)
+        dds = (peaks - equity_curve) / peaks
+        sim_max_drawdowns.append(float(np.max(dds) * 100.0))
+
+    final_eq = np.array(sim_final_equity)
+    max_dds = np.array(sim_max_drawdowns)
+
+    return {
+        "status": "SUCCESS",
+        "simulations": n_sims,
+        "n_assets": n_assets,
+        "n_days": n_days,
+        "median_final_equity": round(float(np.median(final_eq)), 2),
+        "p5_final_equity": round(float(np.percentile(final_eq, 5)), 2),
+        "p95_final_equity": round(float(np.percentile(final_eq, 95)), 2),
+        "median_max_drawdown_pct": round(float(np.median(max_dds)), 2),
+        "p95_max_drawdown_pct": round(float(np.percentile(max_dds, 95)), 2),
+        "var_95_pct": round(float(np.percentile(max_dds, 95)), 2),
+        "cvar_95_pct": round(float(np.mean(max_dds[max_dds >= np.percentile(max_dds, 95)])), 2),
+    }
+
+
+def walk_forward_backtest(
+    df: Optional[pd.DataFrame] = None,
+    train_window: int = 252,
+    test_window: int = 126,
+    roll_step: int = 63,
+    param_grid: Optional[List[Dict[str, Any]]] = None,
+    symbol: str = "NIFTY_PORTFOLIO"
+) -> Dict[str, Any]:
+    """
+    Walk-Forward Cross-Validation backtest with rolling train and out-of-sample test windows.
+    Rolls forward in time, optimizing strategy parameters on in-sample folds,
+    and evaluating on forward out-of-sample periods.
+    """
+    if df is None or df.empty:
+        from data.fetch import load_cached
+        df = load_cached("RELIANCE.NS")
+        if df.empty or len(df) < (train_window + test_window):
+            for alt_sym in ["TCS.NS", "INFY.NS", "ICICIBANK.NS"]:
+                df = load_cached(alt_sym)
+                if not df.empty and len(df) >= (train_window + test_window):
+                    break
+
+    if df is None or len(df) < (train_window + test_window):
+        return {
+            "status": "ERROR",
+            "message": f"Insufficient historical data bars ({len(df) if df is not None else 0}) for train_window={train_window} + test_window={test_window}."
+        }
+
+    default_param_grid = [
+        {"fast_ma": 10, "slow_ma": 30, "atr_window": 14, "stop_mult": 2.0},
+        {"fast_ma": 20, "slow_ma": 50, "atr_window": 14, "stop_mult": 2.5},
+        {"fast_ma": 15, "slow_ma": 45, "atr_window": 20, "stop_mult": 2.0},
+    ]
+    grid = param_grid or default_param_grid
+
+    total_bars = len(df)
+    folds = []
+    out_of_sample_returns = []
+
+    for test_start in range(0, total_bars - train_window - test_window + 1, roll_step):
+        train_start = test_start
+        train_end = train_start + train_window
+        test_end = train_end + test_window
+
+        train_slice = df.iloc[train_start:train_end]
+        test_slice = df.iloc[train_end:test_end]
+
+        best_score = -999.0
+        best_params = grid[0]
+
+        for p in grid:
+            fast = train_slice["Close"].rolling(p["fast_ma"]).mean()
+            slow = train_slice["Close"].rolling(p["slow_ma"]).mean()
+            sig = (fast > slow).astype(float).shift(1).fillna(0.0)
+            rets = train_slice["Close"].pct_change().fillna(0.0) * sig
+            mean_r = rets.mean()
+            std_r = rets.std()
+            sharpe = (mean_r / std_r * np.sqrt(252)) if std_r > 1e-6 else -1.0
+            if sharpe > best_score:
+                best_score = sharpe
+                best_params = p
+
+        fast_test = test_slice["Close"].rolling(best_params["fast_ma"]).mean()
+        slow_test = test_slice["Close"].rolling(best_params["slow_ma"]).mean()
+        sig_test = (fast_test > slow_test).astype(float).shift(1).fillna(0.0)
+        test_rets = (test_slice["Close"].pct_change().fillna(0.0) * sig_test).values
+        out_of_sample_returns.extend(test_rets)
+
+        fold_cum_ret = float(np.prod(1.0 + test_rets) - 1.0) * 100.0
+        fold_std = float(np.std(test_rets))
+        fold_sharpe = float((np.mean(test_rets) / fold_std * np.sqrt(252))) if fold_std > 1e-6 else 0.0
+
+        folds.append({
+            "fold_index": len(folds) + 1,
+            "train_range": f"{train_start} to {train_end}",
+            "test_range": f"{train_end} to {test_end}",
+            "best_params": best_params,
+            "train_sharpe": round(best_score, 2),
+            "test_sharpe": round(fold_sharpe, 2),
+            "test_return_pct": round(fold_cum_ret, 2)
+        })
+
+    oos_arr = np.array(out_of_sample_returns)
+    oos_eq = 100000.0 * np.cumprod(1.0 + oos_arr)
+    peaks = np.maximum.accumulate(oos_eq)
+    max_dd = float(np.max((peaks - oos_eq) / peaks) * 100.0) if len(oos_eq) > 0 else 0.0
+    total_ret = float((oos_eq[-1] / 100000.0 - 1.0) * 100.0) if len(oos_eq) > 0 else 0.0
+    avg_sharpe = float(np.mean([f["test_sharpe"] for f in folds])) if folds else 0.0
+
+    return {
+        "status": "SUCCESS",
+        "symbol": symbol,
+        "total_folds": len(folds),
+        "train_window": train_window,
+        "test_window": test_window,
+        "roll_step": roll_step,
+        "average_test_sharpe": round(avg_sharpe, 2),
+        "out_of_sample_return_pct": round(total_ret, 2),
+        "out_of_sample_max_drawdown_pct": round(max_dd, 2),
+        "folds": folds
+    }
+
+
+@dataclass
+class TradeMetrics:
+    symbol: str
+    entry_date: Any
+    entry_price: float
+    exit_date: Any
+    exit_price: float
+    slippage_bps: float = 15.0
+    holding_days: int = 5
+    pnl_pct: float = 0.0
+    driven_by: str = "MOMENTUM"  # MOMENTUM, EVENT, MACRO, MEAN_REVERSION
+    regime_at_entry: str = "RISK-ON"
+    catalyst: Optional[str] = None
+
+
+class BacktestValidator:
+    """
+    Compares backtest simulation models against actual live post-trade execution results.
+    Validates slippage variance and alpha attribution reconciliation.
+    """
+    def __init__(
+        self,
+        backtest_results: Dict[str, Any],
+        live_trades: List[Union[TradeMetrics, Dict[str, Any]]]
+    ):
+        self.backtest = backtest_results
+        self.live = []
+        for t in live_trades:
+            if isinstance(t, TradeMetrics):
+                self.live.append(t)
+            elif isinstance(t, dict):
+                self.live.append(TradeMetrics(
+                    symbol=t.get("symbol", "UNKNOWN"),
+                    entry_date=t.get("entry_date"),
+                    entry_price=float(t.get("entry_price", 0.0)),
+                    exit_date=t.get("exit_date"),
+                    exit_price=float(t.get("exit_price", 0.0)),
+                    slippage_bps=float(t.get("slippage_bps", 15.0)),
+                    holding_days=int(t.get("holding_days", 1)),
+                    pnl_pct=float(t.get("pnl_pct", 0.0)),
+                    driven_by=t.get("driven_by", "MOMENTUM"),
+                    regime_at_entry=t.get("regime_at_entry", "RISK-ON"),
+                    catalyst=t.get("catalyst")
+                ))
+
+    def validate_slippage(self) -> Dict[str, Any]:
+        """Check if live slippage matches backtest assumptions."""
+        backtest_assumed_bps = float(self.backtest.get("assumed_slippage_bps", 15.0))
+        if not self.live:
+            return {
+                "backtest_assumption_bps": backtest_assumed_bps,
+                "live_avg_slippage_bps": 0.0,
+                "variance_bps": 0.0,
+                "requires_model_update": False,
+                "total_live_trades": 0
+            }
+        live_avg_bps = float(np.mean([t.slippage_bps for t in self.live]))
+        variance_bps = live_avg_bps - backtest_assumed_bps
+        return {
+            "backtest_assumption_bps": round(backtest_assumed_bps, 2),
+            "live_avg_slippage_bps": round(live_avg_bps, 2),
+            "variance_bps": round(variance_bps, 2),
+            "requires_model_update": abs(variance_bps) > 10.0,
+            "total_live_trades": len(self.live)
+        }
+
+    def validate_alpha_attribution(self) -> Dict[str, Any]:
+        """Reconcile backtest forecasted returns against actual live returns by alpha driver."""
+        attribution = {}
+        for t in self.live:
+            cat = t.driven_by or "MOMENTUM"
+            if cat not in attribution:
+                attribution[cat] = {"count": 0, "total_pnl_pct": 0.0}
+            attribution[cat]["count"] += 1
+            attribution[cat]["total_pnl_pct"] += t.pnl_pct
+
+        summary = {}
+        for cat, data in attribution.items():
+            avg_ret = data["total_pnl_pct"] / data["count"] if data["count"] > 0 else 0.0
+            summary[cat] = {
+                "trades": data["count"],
+                "avg_return_pct": round(avg_ret, 2),
+                "total_return_pct": round(data["total_pnl_pct"], 2)
+            }
+
+        forecasted = float(self.backtest.get("cagr_pct", self.backtest.get("total_return_pct", 18.0)))
+        actual_total = float(sum(t.pnl_pct for t in self.live)) if self.live else 0.0
+
+        return {
+            "forecasted_return_pct": round(forecasted, 2),
+            "actual_live_return_pct": round(actual_total, 2),
+            "attribution_by_strategy": summary,
+            "in_line_with_backtest": abs(actual_total - forecasted) < 15.0 if self.live else True
+        }
+
+
 def generate_strategy_tear_sheet(
     backtest_results: Dict[str, Any],
     output_path: Optional[str] = None

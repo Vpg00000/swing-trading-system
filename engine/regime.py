@@ -5,8 +5,10 @@ for the day. See DESIGN.md "Regime filter" section for the source rules.
 """
 
 import sys
+import datetime
 from dataclasses import dataclass
 from pathlib import Path
+from typing import Optional, Dict, Any, Tuple
 
 import pandas as pd
 
@@ -108,13 +110,8 @@ def classify_regime(
     pct50 = above_50_count / total_valid if total_valid > 0 else 0.5
     breadth_score = (pct20 + pct50) / 2 * 100
 
-    # Institutional Score (Sector Indices)
-    if macro and "nifty_sectors" in macro and macro["nifty_sectors"]:
-        sectors = macro["nifty_sectors"]
-        avg_sector_chg = sum(s.change_pct for s in sectors) / len(sectors)
-        institutional_score = max(0.0, min(100.0, (avg_sector_chg + 1.0) / 2.0 * 100))
-    else:
-        institutional_score = 50.0
+    # Institutional Score (Sector Indices with staleness decay)
+    institutional_score, _ = get_institutional_score_with_staleness(macro)
 
     # Global Score (Global Equities)
     if macro and "global_equity" in macro and macro["global_equity"]:
@@ -160,6 +157,113 @@ def classify_regime(
         liquidity_score=round(liquidity_score, 1),
         regime_score=round(regime_score, 1),
     )
+
+
+def get_institutional_score_with_staleness(macro: Optional[dict]) -> tuple[float, float]:
+    """
+    Computes institutional score with exponential staleness decay.
+    Uses cached values and decays confidence towards neutral (50.0) as data ages,
+    rather than jumping discontinuously to a default.
+    Returns: (decayed_score, confidence_weight)
+    """
+    if not macro or "nifty_sectors" not in macro or not macro["nifty_sectors"]:
+        return 50.0, 0.5
+
+    sectors = macro["nifty_sectors"]
+    avg_sector_chg = sum(getattr(s, "change_pct", 0.0) if hasattr(s, "change_pct") else s.get("change_pct", 0.0) for s in sectors) / max(1, len(sectors))
+    base_score = max(0.0, min(100.0, (avg_sector_chg + 1.0) / 2.0 * 100.0))
+
+    data_age_days = 0.0
+    first_sec = sectors[0]
+    date_val = getattr(first_sec, "data_date", None) if hasattr(first_sec, "data_date") else (first_sec.get("data_date") if isinstance(first_sec, dict) else None)
+    if date_val:
+        try:
+            if isinstance(date_val, str):
+                dt = datetime.date.fromisoformat(date_val)
+            else:
+                dt = date_val
+            data_age_days = max(0.0, (datetime.date.today() - dt).days)
+        except Exception:
+            data_age_days = 0.0
+    elif "data_age_days" in macro:
+        data_age_days = float(macro["data_age_days"])
+
+    confidence = max(0.5, 1.0 - (data_age_days / 7.0))
+    decayed_score = 50.0 + (base_score - 50.0) * confidence
+
+    return round(decayed_score, 1), round(confidence, 2)
+
+
+def monitor_vix_spike(vix_level: float, prev_vix: Optional[float] = None) -> dict[str, Any]:
+    """
+    Real-time India VIX spike monitor and circuit breaker.
+    DESIGN.md:
+      - VIX > 35: Extreme Crisis / Emergency derisking
+      - VIX > 30: Elevated High-Vol Alert
+      - VIX > 20: Volatile Caution
+      - Sudden intraday spike >= 5.0 pts: Spike Emergency Trigger
+    """
+    spike_detected = False
+    if prev_vix is not None and (vix_level - prev_vix) >= 5.0:
+        spike_detected = True
+
+    if vix_level >= 35.0 or spike_detected:
+        status = "SPIKE_EMERGENCY"
+        action = "HALVE_EQUITY_AND_ACTIVATE_HEDGE"
+    elif vix_level >= 30.0:
+        status = "ELEVATED"
+        action = "REDUCE_POSITION_SIZES_AND_TIGHTEN_STOPS"
+    elif vix_level >= 20.0:
+        status = "CAUTION"
+        action = "SELECTIVE_ENTRY_ONLY"
+    else:
+        status = "NORMAL"
+        action = "STANDARD_EXECUTION"
+
+    return {
+        "vix": vix_level,
+        "prev_vix": prev_vix,
+        "vix_change": round(vix_level - prev_vix, 2) if prev_vix is not None else 0.0,
+        "status": status,
+        "action": action,
+        "emergency_mode_triggered": (status == "SPIKE_EMERGENCY")
+    }
+
+
+def should_hedge_portfolio(regime_score: float, vix: float) -> bool:
+    """
+    Determines whether tail-risk protective hedge should be activated.
+    Hedge triggered if VIX > 20.0 or Regime Score < 45.0.
+    """
+    return bool(vix > 20.0 or regime_score < 45.0)
+
+
+def calculate_hedge_size(
+    total_capital: float,
+    portfolio_beta: float = 1.0,
+    vix: float = 18.0
+) -> dict[str, Any]:
+    """
+    Computes recommended allocation for tail-risk hedging (protective puts / VIX calls).
+    Typically 2-5% of total capital scaled by portfolio beta and volatility regime.
+    """
+    base_pct = 0.02
+    if vix > 25.0:
+        base_pct = 0.045
+    elif vix > 20.0:
+        base_pct = 0.035
+    elif portfolio_beta > 1.2:
+        base_pct = 0.03
+
+    hedge_capital = round(total_capital * base_pct, 2)
+    instrument = "VIX_CALLS" if vix < 15.0 else "NIFTY_PUT_SPREAD"
+
+    return {
+        "hedge_pct": round(base_pct * 100.0, 2),
+        "hedge_capital_inr": hedge_capital,
+        "recommended_instrument": instrument,
+        "rationale": f"Hedge sized at {base_pct*100:.1f}% for Beta={portfolio_beta:.2f} and VIX={vix:.1f}"
+    }
 
 
 if __name__ == "__main__":

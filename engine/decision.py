@@ -195,6 +195,7 @@ def compute_composite_score(
     has_upcoming_event: bool = False,
     sector_stacking_risk: bool = False,
     circuit_risk: bool = False,
+    sector_concentration_pct: Optional[float] = None,
 ) -> tuple[float, dict[str, float], list[str], list[str]]:
     """
     Computes the /100 composite score using the 10-component formula.
@@ -251,11 +252,9 @@ def compute_composite_score(
     if valuation_score_100 is None:
         missing.append("valuation_score")
 
-    # ── Risk Concerns (don't change score, just flag) ─────────────────────────
+    # ── Concerns Generation ──────────────────────────────────────────────────
     if stop_distance_pct > 0.08:
-        concerns.append(f"wide stop ({stop_distance_pct:.1%})")
-    elif stop_distance_pct > 0.05:
-        concerns.append(f"moderate stop ({stop_distance_pct:.1%})")
+        concerns.append(f"wide stop distance ({stop_distance_pct * 100:.1f}%)")
 
     if pledged_pct >= 50.0:
         concerns.append(f"CRITICAL: promoter pledge {pledged_pct:.1f}%")
@@ -268,6 +267,8 @@ def compute_composite_score(
         concerns.append("corporate action/board meeting within 21 days")
     if sector_stacking_risk:
         concerns.append("sector-stacking risk: sector exposure exceeds 20% limit")
+    elif sector_concentration_pct is not None and sector_concentration_pct >= 15.0:
+        concerns.append(f"sector concentration pre-warning: {sector_concentration_pct:.1f}% approaches 20% limit")
     if circuit_risk:
         concerns.append("circuit risk: price is near daily circuit limit")
 
@@ -310,6 +311,8 @@ def classify_action(
     sector_overall_score: Optional[float],
     concerns: list[str],
     circuit_risk: bool = False,
+    price_vs_50dma: Optional[float] = None,
+    price_vs_20dma: Optional[float] = None,
 ) -> str:
     """
     Classifies the suggested action using the rich vocabulary.
@@ -317,6 +320,7 @@ def classify_action(
       - Emergency market regime -> CASH (or EXIT if held)
       - Circuit proximity -> WAIT_FOR_CIRCUIT_CLEARANCE (prevents frozen orders/slippage)
       - Sector stacking (>20% portfolio cap) -> HOLD OFF / SECTOR CONCENTRATED (or REDUCE if held)
+      - Technical support gating -> WAIT_FOR_PULLBACK / BUY_ON_PULLBACK when overextended >5% above 50-DMA
     """
     if is_held:
         if regime_state == "EMERGENCY":
@@ -359,6 +363,11 @@ def classify_action(
         ):
             return "WAIT_FOR_BREAKOUT"
         if rank is not None and rank <= 8 and composite_score >= 65.0:
+            # Trend / technical support gating: avoid buying overextended peaks
+            if price_vs_50dma is not None and price_vs_50dma >= 5.0:
+                return "BUY_ON_PULLBACK"
+            if price_vs_20dma is not None and price_vs_20dma < -2.0:
+                return "WAIT_FOR_PULLBACK"
             if stop_distance_pct > 0.08:
                 return "BUY_ON_PULLBACK"
             return "BUY_NOW"
@@ -400,6 +409,9 @@ def evaluate_decision(
     insider_score: Optional[float] = None,
     bulk_block_score: Optional[float] = None,
     circuit_risk: bool = False,
+    sector_concentration_pct: Optional[float] = None,
+    price_vs_50dma: Optional[float] = None,
+    price_vs_20dma: Optional[float] = None,
 ) -> DecisionResult:
     """
     Runs the full decision loop for a symbol and returns a DecisionResult.
@@ -408,9 +420,8 @@ def evaluate_decision(
     """
     # Legacy compatibility: decompose money_flow_total into components
     if money_flow_total is not None and ownership_score is None and insider_score is None:
-        # money_flow_total is -20..+20. Split roughly 40% ownership, 60% insider+bulk
-        ownership_score = money_flow_total * 0.4 / 5.0 * 4.0  # scale to -4..+4
-        insider_score = money_flow_total * 0.6 / 5.0 * 8.0    # scale to -8..+8
+        ownership_score = money_flow_total * 0.4 / 5.0 * 4.0
+        insider_score = money_flow_total * 0.6 / 5.0 * 8.0
         bulk_block_score = 0.0
 
     total, components, concerns, missing = compute_composite_score(
@@ -433,6 +444,7 @@ def evaluate_decision(
         has_upcoming_event=has_upcoming_event,
         sector_stacking_risk=sector_stacking_risk,
         circuit_risk=circuit_risk,
+        sector_concentration_pct=sector_concentration_pct,
     )
 
     action = classify_action(
@@ -450,8 +462,9 @@ def evaluate_decision(
         sector_overall_score=sector_overall_score,
         concerns=concerns,
         circuit_risk=circuit_risk,
+        price_vs_50dma=price_vs_50dma,
+        price_vs_20dma=price_vs_20dma,
     )
-
 
     return DecisionResult(
         symbol=symbol,
@@ -470,3 +483,50 @@ def evaluate_decision(
         concerns=concerns,
         missing_components=missing,
     )
+
+
+def check_emergency_derisking(portfolio_pnl_pct: float) -> tuple[bool, float, str]:
+    """
+    Portfolio emergency de-risking gate based on peak drawdown.
+    DESIGN.md: -8% drawdown from peak -> halve equity exposure (multiplier 0.5)
+               -5% drawdown -> trim 35% (multiplier 0.65)
+               -2% drawdown -> trim 15% (multiplier 0.85)
+    Returns: (should_derisque: bool, multiplier: float, mode: str)
+    """
+    if portfolio_pnl_pct <= -8.0:
+        return True, 0.50, "HALVE_EXPOSURE"
+    elif portfolio_pnl_pct <= -5.0:
+        return True, 0.65, "TRIM_35_PCT"
+    elif portfolio_pnl_pct <= -2.0:
+        return True, 0.85, "TRIM_15_PCT"
+    else:
+        return False, 1.00, "NORMAL"
+
+
+def rank_by_expected_sharpe(
+    candidates: list[DecisionResult],
+    top_n: int = 3,
+    atr_pct_map: Optional[dict[str, float]] = None,
+    stop_pct_map: Optional[dict[str, float]] = None
+) -> list[DecisionResult]:
+    """
+    Ranks buy candidates by expected-return/risk score (Sharpe-like metric)
+    and returns the top N highest-conviction picks.
+    Expected return = 3x ATR target distance.
+    Risk = stop distance %.
+    """
+    scored = []
+    for c in candidates:
+        action = getattr(c, "suggested_action", "")
+        if action.startswith("BUY") or action == "WAIT_FOR_BREAKOUT":
+            sym = c.symbol
+            stop_dist = (stop_pct_map or {}).get(sym, 0.05)
+            atr_pct = (atr_pct_map or {}).get(sym, stop_dist / 2.0)
+            expected_return_pct = max(1.0, 3.0 * atr_pct * 100.0)
+            risk_pct = max(0.1, stop_dist * 100.0)
+            conviction_weight = c.overall_score / 100.0
+            sharpe_like = (expected_return_pct / risk_pct) * conviction_weight
+            scored.append((c, sharpe_like))
+
+    scored.sort(key=lambda x: x[1], reverse=True)
+    return [c for c, _ in scored[:top_n]]

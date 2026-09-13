@@ -191,6 +191,147 @@ def evaluate_universe(capital_inr: float, symbols: list[str] = None) -> list[Can
     return candidates
 
 
+def compute_atr_adaptive(df: pd.DataFrame, base_window: int = 14, vix: Optional[float] = None) -> float:
+    """
+    Computes volatility-smoothed ATR. Uses longer lookback windows (21, 30 days)
+    during high volatility regimes (VIX > 25) to prevent whipsaw stop-outs,
+    and tighter multiplier in low volatility (VIX < 12).
+    """
+    atr_14 = compute_atr(df, base_window)
+    atr_21 = compute_atr(df, 21) if len(df) >= 22 else atr_14
+    atr_30 = compute_atr(df, 30) if len(df) >= 31 else atr_21
+
+    if vix is None:
+        try:
+            from config.universe import INDIA_VIX
+            vix_df = load_cached(INDIA_VIX)
+            if not vix_df.empty and "Close" in vix_df.columns:
+                vix = float(vix_df["Close"].iloc[-1])
+            else:
+                vix = 15.0
+        except Exception:
+            vix = 15.0
+
+    if vix > 25.0:
+        return round((atr_21 + atr_30) / 2.0, 2)
+    elif vix < 12.0:
+        return round(atr_14 * 0.9, 2)
+    else:
+        return round(atr_14, 2)
+
+
+def score_with_earnings_forward(candidate: Candidate, days_to_earnings: Optional[int] = None) -> float:
+    """
+    Reduces momentum confidence score for stocks with imminent earnings announcements
+    (where binary event variance dominates momentum factor).
+    """
+    if days_to_earnings is None:
+        days_to_earnings = getattr(candidate, "days_to_earnings", None)
+
+    if days_to_earnings is None:
+        return candidate.momentum_score
+
+    if days_to_earnings < 7:
+        return round(candidate.momentum_score * 0.60, 4)
+    elif days_to_earnings < 14:
+        return round(candidate.momentum_score * 0.75, 4)
+    elif days_to_earnings < 21:
+        return round(candidate.momentum_score * 0.85, 4)
+    else:
+        return round(candidate.momentum_score, 4)
+
+
+def filter_earnings_candidates(
+    ranked: list[Candidate],
+    earnings_lookup: Optional[dict[str, int]] = None,
+    min_days: int = 7,
+    max_days: int = 45
+) -> list[Candidate]:
+    """
+    Filters out candidates with scheduled earnings inside the event window
+    to eliminate binary event shock risk.
+    """
+    if not earnings_lookup:
+        return ranked
+
+    filtered = []
+    for c in ranked:
+        days = earnings_lookup.get(c.symbol)
+        if days is not None and min_days <= days <= max_days:
+            continue
+        filtered.append(c)
+    return filtered
+
+
+def rebalance_momentum_portfolio(
+    current_holdings: dict[str, float],
+    ranked_candidates: list[Candidate],
+    target_count: int = 6,
+    max_turnover_pct: float = 0.20,
+    total_portfolio_value: Optional[float] = None
+) -> dict[str, Any]:
+    """
+    Active weekly momentum portfolio rebalancer with turnover constraints.
+    Rebalances capital across top ranked momentum candidates while capping turnover
+    to control transaction drag and slippage.
+    """
+    current_symbols = set(current_holdings.keys())
+    curr_val = total_portfolio_value if total_portfolio_value is not None else sum(current_holdings.values())
+    if curr_val <= 0:
+        curr_val = sum(c.position_size_inr for c in ranked_candidates[:target_count])
+
+    top_candidates = ranked_candidates[:target_count]
+    target_symbols = {c.symbol for c in top_candidates}
+    target_slot_val = curr_val / max(1, target_count)
+
+    raw_targets: dict[str, float] = {}
+    for c in top_candidates:
+        raw_targets[c.symbol] = target_slot_val
+
+    # Calculate raw turnover required
+    all_syms = current_symbols | set(raw_targets.keys())
+    raw_turnover_inr = sum(abs(raw_targets.get(s, 0.0) - current_holdings.get(s, 0.0)) for s in all_syms) / 2.0
+    raw_turnover_pct = raw_turnover_inr / curr_val if curr_val > 0 else 0.0
+
+    if raw_turnover_pct > max_turnover_pct and curr_val > 0:
+        # Scale towards target using hybrid turnover cap
+        scale = (max_turnover_pct * curr_val) / max(1.0, raw_turnover_inr)
+        adjusted_targets: dict[str, float] = {}
+        for s in all_syms:
+            cur = current_holdings.get(s, 0.0)
+            tar = raw_targets.get(s, 0.0)
+            new_val = cur + (tar - cur) * min(1.0, scale)
+            if new_val > 100.0:  # prune negligible amounts
+                adjusted_targets[s] = round(new_val, 2)
+        effective_targets = adjusted_targets
+        turnover_inr = sum(abs(effective_targets.get(s, 0.0) - current_holdings.get(s, 0.0)) for s in all_syms) / 2.0
+        turnover_pct = turnover_inr / curr_val
+    else:
+        effective_targets = {k: round(v, 2) for k, v in raw_targets.items()}
+        turnover_inr = raw_turnover_inr
+        turnover_pct = raw_turnover_pct
+
+    exits = [s for s in current_symbols if s not in effective_targets]
+    entries = [s for s in effective_targets if s not in current_symbols]
+    rebalanced_syms = list(effective_targets.keys())
+
+    # Transaction cost model: 20 bps on total traded volume (buys + sells)
+    est_cost_inr = round(turnover_inr * 2.0 * 0.0020, 2)
+
+    return {
+        "status": "SUCCESS",
+        "portfolio_value_inr": round(curr_val, 2),
+        "target_holdings": effective_targets,
+        "turnover_inr": round(turnover_inr, 2),
+        "turnover_pct": round(turnover_pct * 100.0, 2),
+        "max_turnover_pct": round(max_turnover_pct * 100.0, 2),
+        "turnover_capped": raw_turnover_pct > max_turnover_pct,
+        "estimated_cost_inr": est_cost_inr,
+        "rebalanced_symbols": rebalanced_syms,
+        "entries": entries,
+        "exits": exits
+    }
+
 
 if __name__ == "__main__":
     CAPITAL = 1_00_00_000  # Rs 1 crore

@@ -25,8 +25,13 @@ logs/
 *.log
 
 # Local/generated data
-data/
+data/*.db*
+data/cache/
+data/backups/
+data/institutional/
+data/nav_history/
 !data/dhan/
+!data/*.py
 scratch/
 reports/
 

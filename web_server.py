@@ -23,6 +23,8 @@ except ImportError:
     brotli = None
     HAS_BROTLI = False
 
+import uuid
+from concurrent.futures import ThreadPoolExecutor
 from typing import Optional, List, Dict, Any, Set, Tuple
 from pathlib import Path
 from fastapi import FastAPI, HTTPException, Query, Body, Request, WebSocket, WebSocketDisconnect
@@ -238,6 +240,24 @@ METRICS_LATENCY_SUM: Dict[Tuple[str, str], float] = {}
 METRICS_LATENCY_COUNT: Dict[Tuple[str, str], int] = {}
 WEBSOCKET_TICKS_TOTAL = 1250
 WEBSOCKET_ACTIVE_CONNECTIONS = 3
+
+class SimpleRateLimiter:
+    """Sliding-window in-memory rate limiter protecting heavy calculation endpoints."""
+    def __init__(self, max_requests: int = 150, window_sec: float = 60.0):
+        self.max_requests = max_requests
+        self.window_sec = window_sec
+        self.history: Dict[str, List[float]] = {}
+
+    def is_allowed(self, client_ip: str) -> bool:
+        now = time.time()
+        calls = self.history.setdefault(client_ip, [])
+        self.history[client_ip] = [t for t in calls if now - t < self.window_sec]
+        if len(self.history[client_ip]) >= self.max_requests:
+            return False
+        self.history[client_ip].append(now)
+        return True
+
+global_rate_limiter = SimpleRateLimiter(max_requests=150, window_sec=60.0)
 
 @app.middleware("http")
 async def prometheus_metrics_middleware(request, call_next):
@@ -3721,6 +3741,60 @@ async def get_tear_sheet_report(payload: Dict[str, Any] = Body(default={})):
     })
     res = generate_strategy_tear_sheet(bt_res)
     return HTMLResponse(content=res["html_report"], status_code=200)
+
+
+class BacktestQueue:
+    """Thread pool queue for asynchronous heavy backtesting runs."""
+    def __init__(self, max_workers: int = 2):
+        self.executor = ThreadPoolExecutor(max_workers=max_workers)
+        self.jobs: Dict[str, Dict[str, Any]] = {}
+
+    def submit_job(self, task_fn, *args, **kwargs) -> str:
+        job_id = str(uuid.uuid4())
+        self.jobs[job_id] = {
+            "status": "QUEUED",
+            "submitted_at": datetime.datetime.now().isoformat(),
+            "result": None,
+            "error": None
+        }
+
+        def _worker():
+            self.jobs[job_id]["status"] = "RUNNING"
+            try:
+                res = task_fn(*args, **kwargs)
+                self.jobs[job_id]["status"] = "COMPLETED"
+                self.jobs[job_id]["result"] = res
+            except Exception as e:
+                self.jobs[job_id]["status"] = "FAILED"
+                self.jobs[job_id]["error"] = str(e)
+
+        self.executor.submit(_worker)
+        return job_id
+
+    def get_job_status(self, job_id: str) -> Optional[Dict[str, Any]]:
+        return self.jobs.get(job_id)
+
+global_backtest_queue = BacktestQueue(max_workers=2)
+
+
+@app.api_route("/api/backtest/queue/submit", methods=["GET", "POST"])
+async def submit_queued_backtest(payload: Dict[str, Any] = Body(default={})):
+    """Asynchronously submit a heavy backtest job to the background worker pool."""
+    from engine.backtest import run_standard_momentum_backtest
+    symbols = payload.get("symbols")
+    initial_cap = float(payload.get("initial_capital", 1000000.0))
+    job_id = global_backtest_queue.submit_job(run_standard_momentum_backtest, symbols=symbols, initial_capital=initial_cap)
+    return {"status": "SUBMITTED", "job_id": job_id}
+
+
+@app.api_route("/api/backtest/queue/status/{job_id}", methods=["GET"])
+async def get_queued_backtest_status(job_id: str):
+    """Query completion status and results for an asynchronous backtest job."""
+    status = global_backtest_queue.get_job_status(job_id)
+    if not status:
+        raise HTTPException(status_code=404, detail="Backtest job not found")
+    return {"job_id": job_id, "data": status}
+
 
 
 # ── Phase 18 & Phase 19: Market Depth, Order Flow & Multi-Broker Integration ─

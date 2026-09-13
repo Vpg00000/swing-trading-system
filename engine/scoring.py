@@ -656,3 +656,55 @@ def calculate_confluence_score(
     }
 
 
+def detect_flow_divergence(
+    fii_net_crores: float,
+    dii_net_crores: float,
+    price_change_pct: float
+) -> Dict[str, Any]:
+    """
+    Detects intraday microstructure divergence between FII/DII institutional flows and price action.
+    Cases:
+      - INSTITUTIONAL_ABSORPTION: Heavy FII selling (< -1000 Cr) but price positive (> 0.2%) -> DII absorption.
+      - BULLISH_DIVERGENCE: Net institutional buying (> +1000 Cr) but price lagging/negative (< -0.2%) -> Accumulation.
+      - BEARISH_DISTRIBUTION: Price up (> +0.3%) but FII dumping aggressively (< -1200 Cr) -> Smart money exit into strength.
+      - CONVERGENT_FLOW: Flows and price moving in tandem.
+    """
+    net_inst_crores = fii_net_crores + dii_net_crores
+    divergence_type = "CONVERGENT_FLOW"
+    signal_bias = "NEUTRAL"
+    divergence_score = 50.0
+
+    if price_change_pct > 0.3 and fii_net_crores < -1200.0:
+        divergence_type = "BEARISH_DISTRIBUTION"
+        signal_bias = "BEARISH_REVERSAL_RISK"
+        divergence_score = 25.0
+    elif price_change_pct < -0.3 and net_inst_crores > 1000.0:
+        divergence_type = "BULLISH_DIVERGENCE"
+        signal_bias = "BULLISH_ACCUMULATION"
+        divergence_score = 80.0
+    elif price_change_pct >= 0.0 and fii_net_crores < -1000.0 and dii_net_crores > 1200.0:
+        divergence_type = "INSTITUTIONAL_ABSORPTION"
+        signal_bias = "DII_ABSORPTION"
+        divergence_score = 65.0
+    elif price_change_pct > 0.5 and net_inst_crores > 1500.0:
+        divergence_type = "CONVERGENT_ACCUMULATION"
+        signal_bias = "STRONG_BULLISH"
+        divergence_score = 90.0
+    elif price_change_pct < -0.5 and net_inst_crores < -1500.0:
+        divergence_type = "CONVERGENT_LIQUIDATION"
+        signal_bias = "STRONG_BEARISH"
+        divergence_score = 15.0
+
+    return {
+        "divergence_type": divergence_type,
+        "signal_bias": signal_bias,
+        "divergence_score": divergence_score,
+        "fii_net_crores": round(fii_net_crores, 2),
+        "dii_net_crores": round(dii_net_crores, 2),
+        "net_institutional_crores": round(net_inst_crores, 2),
+        "price_change_pct": round(price_change_pct, 2),
+        "alert_triggered": divergence_type in ["BEARISH_DISTRIBUTION", "BULLISH_DIVERGENCE", "INSTITUTIONAL_ABSORPTION"]
+    }
+
+
+
