@@ -531,23 +531,26 @@ function initGridColumnSort() {
 }
 window.initGridColumnSort = initGridColumnSort;
 
-async function loadScreenerGridData(category = 'ALL', search = '', sortBy = 'composite_score', order = 'desc') {
+async function loadScreenerGridData(category = 'ALL', search = '', sortBy = 'composite_score', order = 'desc', forceRefresh = false) {
     const tbody = document.getElementById('screenerTableBody');
     const searchBadge = document.getElementById('gridSearchStatusBadge');
     if (!tbody) return;
 
+    window.currentGridCategory = category;
+    window.currentGridSearch = search;
     window._gridSortState = { col: sortBy, order: order };
     updateHeaderSortIndicators(sortBy, order);
-    if (!tbody.querySelector('.skeleton-row-tr')) {
+    if (!tbody.querySelector('.skeleton-row-tr') && (!window.virtualGridState || !window.virtualGridState.data || window.virtualGridState.data.length === 0)) {
         tbody.innerHTML = getScreenerSkeletonRowsHtml(10);
     }
 
     try {
-        let url = `/api/grid/stocks?limit=10000&cap=${encodeURIComponent(category)}`;
+        let url = `/api/grid/stocks?limit=10000&cap=${encodeURIComponent(category)}&_t=${Date.now()}`;
+        if (forceRefresh) url += `&force_refresh=true`;
         if (search) url += `&q=${encodeURIComponent(search)}`;
         if (sortBy) url += `&sort_by=${encodeURIComponent(sortBy)}&order=${encodeURIComponent(order)}`;
 
-        const res = await fetch(url);
+        const res = await fetch(url, { cache: 'no-store' });
         if (!res.ok) throw new Error('API error');
         const data = await res.json();
         if (!Array.isArray(data) || data.length === 0) {
@@ -1116,6 +1119,26 @@ function openExecutionModal(title = 'Execution Terminal Console', taskType = 'PI
     startTerminalLogStream(taskType);
 }
 
+function refreshAllApplicationData(force = true) {
+    const curCat = window.currentGridCategory || 'ALL';
+    const curSearch = document.getElementById('gridSearchInput')?.value || '';
+    const sortCol = window._gridSortState?.col || 'composite_score';
+    const sortOrder = window._gridSortState?.order || 'desc';
+    if (typeof loadScreenerGridData === 'function') {
+        loadScreenerGridData(curCat, curSearch, sortCol, sortOrder, force);
+    }
+    if (typeof loadOpportunitiesData === 'function') {
+        loadOpportunitiesData();
+    }
+    if (typeof loadDashboardData === 'function') {
+        loadDashboardData();
+    }
+    if (typeof loadPortfolioData === 'function') {
+        loadPortfolioData();
+    }
+}
+window.refreshAllApplicationData = refreshAllApplicationData;
+
 function closeExecutionModal() {
     const modal = document.getElementById('execution-modal');
     if (modal) modal.classList.add('hidden');
@@ -1123,6 +1146,7 @@ function closeExecutionModal() {
     if (execLogPollInterval) { clearInterval(execLogPollInterval); execLogPollInterval = null; }
     stopExecTimer();
     removeBackgroundTask('exec_modal');
+    refreshAllApplicationData(true);
 }
 
 function startTerminalLogStream(taskType) {
@@ -1229,9 +1253,7 @@ function startTerminalLogStream(taskType) {
                     playSuccessChime();
 
                     // Trigger data reload for active tabs
-                    if (typeof loadScreenerGridData === 'function') loadScreenerGridData();
-                    if (typeof loadOpportunitiesData === 'function') loadOpportunitiesData();
-                    if (typeof loadPortfolioData === 'function') loadPortfolioData();
+                    refreshAllApplicationData(true);
                 }
             } catch(e) {}
         };
@@ -1272,6 +1294,9 @@ function startTerminalLogStream(taskType) {
 
                     // T-334: Sound chime
                     playSuccessChime();
+
+                    // Trigger data reload for active tabs
+                    refreshAllApplicationData(true);
                 }
             }
         } catch(e) {}
@@ -3450,6 +3475,21 @@ document.addEventListener('DOMContentLoaded', () => {
 
     // Theme cycle button (if present)
     document.getElementById('themeCycleBtn')?.addEventListener('click', cycleTheme);
+
+    // Screener "SYNC ALL DATA" button
+    const oneClickSyncBtn = document.getElementById('oneClickSyncBtn');
+    if (oneClickSyncBtn) {
+        oneClickSyncBtn.addEventListener('click', () => {
+            const btnRun = document.getElementById('btnRunPipeline');
+            if (btnRun) {
+                btnRun.click();
+            } else {
+                showToast('Launching Main Pipeline Data Sync...', 'info');
+                openExecutionModal('Main Pipeline Execution');
+                fetch('/api/pipeline/run', { method: 'POST' }).catch(console.error);
+            }
+        });
+    }
 
     // 4. Screener Grid Category Buttons
     document.querySelectorAll('.grid-tab').forEach(tabBtn => {
