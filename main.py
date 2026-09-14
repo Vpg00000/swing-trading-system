@@ -15,7 +15,7 @@ import sys
 import time
 import argparse
 import logging
-from datetime import date, datetime
+from datetime import date, datetime, timezone
 
 # Force unbuffered stdout/stderr line output
 if hasattr(sys.stdout, "reconfigure"):
@@ -50,9 +50,26 @@ def main():
 
     start_time = time.time()
     today_str = date.today().isoformat()
+
+    # Phase 1 & 3: Run ID Generation and Pipeline Locking
+    from engine.pipeline_config import generate_run_id
+    from data.database import (
+        acquire_pipeline_lock,
+        release_pipeline_lock,
+        create_pipeline_run,
+        update_pipeline_run
+    )
+    
+    run_id = generate_run_id()
+    locked = acquire_pipeline_lock(run_id)
+    if not locked:
+        logger.warning(f"⚠ Pipeline execution lock could not be acquired for {run_id}. Another pipeline may be active.")
+
+    create_pipeline_run(run_id=run_id, universe_mode=args.universe)
+
     logger.info("==================================================")
     logger.info(f"  STARTING CLEAN-SLATE PIPELINE EXECUTION ({today_str})")
-    logger.info(f"  Universe Mode: {args.universe} | Clean-Slate Purge: {args.clean_slate}")
+    logger.info(f"  Run ID: {run_id} | Universe: {args.universe} | Clean-Slate: {args.clean_slate}")
     logger.info("==================================================")
     sys.stdout.flush()
 
@@ -81,11 +98,13 @@ def main():
         universe_list = []
 
     # Step 3/6: High-Speed Parallel Market Sync & Analytics
+    records_synced = 0
     try:
-        logger.info(f"[Step 3/6] High-Speed Parallel Analytics & Bulk Ingest for {len(universe_list)} stocks...")
+        logger.info(f"[Step 3/6] High-Speed Parallel Analytics & Staging for {len(universe_list)} stocks...")
         from data.sync_engine import run_full_sync
-        sync_res = run_full_sync(clean_slate=False, universe_mode=args.universe)
-        logger.info(f"✓ Parallel analysis & database sync complete. Records processed: {sync_res.get('records_count', len(universe_list))}")
+        sync_res = run_full_sync(clean_slate=False, universe_mode=args.universe, run_id=run_id)
+        records_synced = sync_res.get('records_count', len(universe_list))
+        logger.info(f"✓ Parallel analysis & atomic swap complete. Records published: {records_synced}")
         sys.stdout.flush()
     except Exception as exc:
         logger.warning(f"⚠ Market analytics sync notice: {exc}")
@@ -127,9 +146,31 @@ def main():
         logger.warning(f"⚠ Report generation notice: {exc}")
 
     elapsed = round(time.time() - start_time, 2)
+
+    # Update pipeline run record in SQLite audit table
+    try:
+        completed_iso = datetime.now(timezone.utc).isoformat()
+        update_pipeline_run(
+            run_id=run_id,
+            completed_at=completed_iso,
+            status="COMPLETED",
+            discovered_count=len(universe_list),
+            processed_count=records_synced,
+            success_count=records_synced,
+            duration_seconds=elapsed
+        )
+    except Exception as exc:
+        logger.warning(f"⚠ Failed to update pipeline_run audit record: {exc}")
+
+    # Safe release of execution lock
+    try:
+        release_pipeline_lock(run_id)
+    except Exception:
+        pass
+
     logger.info("==================================================")
     logger.info(f"  MAIN PIPELINE EXECUTION COMPLETED IN {elapsed}s  ")
-    logger.info(f"  Total Fresh Analyzed Stocks: {len(universe_list)}")
+    logger.info(f"  Run ID: {run_id} | Total Published Stocks: {records_synced}")
     logger.info("==================================================")
     sys.stdout.flush()
 

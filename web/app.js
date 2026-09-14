@@ -6170,11 +6170,18 @@ function logSystemError(type, message, stack = '') {
 }
 
 window.addEventListener('error', (event) => {
-    logSystemError('JS Error', event.message, `${event.filename}:${event.lineno}`);
+    const msg = event.message || '';
+    if (msg.includes('Failed to fetch') || msg.includes('NetworkError') || msg.includes('Network Error') || msg.includes('ResizeObserver')) return;
+    logSystemError('JS Error', msg, `${event.filename}:${event.lineno}`);
 });
 
 window.addEventListener('unhandledrejection', (event) => {
-    logSystemError('Promise Rejection', event.reason?.message || String(event.reason), event.reason?.stack || '');
+    const msg = event.reason?.message || String(event.reason || '');
+    if (msg.includes('Failed to fetch') || msg.includes('NetworkError') || msg.includes('Network Error') || msg.includes('Load failed')) {
+        // Transient network reconnect or browser extension interception - do not treat as fatal error
+        return;
+    }
+    logSystemError('Promise Rejection', msg, event.reason?.stack || '');
 });
 
 function openErrorLogDrawer() {

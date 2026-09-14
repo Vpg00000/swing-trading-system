@@ -724,6 +724,32 @@ async def purge_all_data():
         raise HTTPException(status_code=500, detail=str(exc))
 
 
+@app.get("/api/pipeline/runs")
+async def get_pipeline_runs(limit: int = Query(20, ge=1, le=100)):
+    """Returns recent pipeline execution history from SQLite audit table."""
+    try:
+        from data.database import get_recent_pipeline_runs
+        runs = get_recent_pipeline_runs(limit=limit)
+        return JSONResponse(content={"status": "SUCCESS", "runs": runs})
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail=str(exc))
+
+
+@app.get("/api/pipeline/runs/{run_id}")
+async def get_pipeline_run_details(run_id: str):
+    """Returns detailed audit record for a specific pipeline execution."""
+    try:
+        from data.database import get_pipeline_run
+        run = get_pipeline_run(run_id)
+        if not run:
+            raise HTTPException(status_code=404, detail=f"Pipeline run {run_id} not found")
+        return JSONResponse(content={"status": "SUCCESS", "run": run})
+    except HTTPException:
+        raise
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail=str(exc))
+
+
 @app.api_route("/api/pipeline/run", methods=["GET", "POST"])
 async def run_main_pipeline(
     payload: Optional[Dict[str, Any]] = Body(None),

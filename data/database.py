@@ -19,6 +19,7 @@ import logging
 import json
 from pathlib import Path
 from typing import Dict, Any, List, Optional, Union
+from datetime import datetime, timezone
 import time
 
 log = logging.getLogger(__name__)
@@ -67,6 +68,61 @@ def init_db():
                 net_alpha_pct REAL,
                 as_of DATETIME DEFAULT CURRENT_TIMESTAMP,
                 updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
+            );
+
+            CREATE TABLE IF NOT EXISTS stock_grid_staging (
+                symbol TEXT PRIMARY KEY,
+                name TEXT,
+                sector TEXT,
+                cap_category TEXT,         -- LARGE, MID, SMALL, PENNY
+                close REAL,
+                change_pct REAL,
+                volume INTEGER,
+                traded_qty INTEGER,
+                delivered_qty INTEGER,
+                delivery_pct REAL,
+                rsi REAL,
+                macd_status TEXT,
+                above_50dma INTEGER,
+                above_200dma INTEGER,
+                pct_from_52w_high REAL,
+                pe REAL,
+                pb REAL,
+                roe REAL,
+                roce REAL,
+                market_cap_cr REAL,
+                composite_score REAL,
+                action TEXT,
+                target_price REAL,
+                stop_loss REAL,
+                rr_ratio REAL,
+                ev_pct REAL,
+                net_alpha_pct REAL,
+                as_of DATETIME DEFAULT CURRENT_TIMESTAMP,
+                updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
+            );
+
+            CREATE TABLE IF NOT EXISTS pipeline_runs (
+                run_id TEXT PRIMARY KEY,
+                started_at TEXT NOT NULL,
+                completed_at TEXT,
+                status TEXT DEFAULT 'INITIALIZING',
+                universe_mode TEXT DEFAULT 'ALL',
+                discovered_count INTEGER DEFAULT 0,
+                processed_count INTEGER DEFAULT 0,
+                success_count INTEGER DEFAULT 0,
+                failed_count INTEGER DEFAULT 0,
+                quality_score REAL DEFAULT 100.0,
+                duration_seconds REAL DEFAULT 0.0,
+                error_summary TEXT,
+                created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+            );
+
+            CREATE TABLE IF NOT EXISTS pipeline_lock (
+                lock_id INTEGER PRIMARY KEY CHECK (lock_id = 1),
+                run_id TEXT NOT NULL,
+                acquired_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+                expires_at DATETIME
             );
 
             CREATE TABLE IF NOT EXISTS portfolio_snapshots (
@@ -384,6 +440,22 @@ def init_db():
                 created_at DATETIME DEFAULT CURRENT_TIMESTAMP
             );
 
+            CREATE TABLE IF NOT EXISTS validation_errors (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                run_id TEXT NOT NULL,
+                symbol TEXT NOT NULL,
+                field TEXT,
+                error_type TEXT NOT NULL,
+                expected TEXT,
+                actual TEXT,
+                severity TEXT DEFAULT 'ERROR',
+                created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+            );
+
+            CREATE INDEX IF NOT EXISTS idx_validation_errors_run ON validation_errors(run_id);
+            CREATE INDEX IF NOT EXISTS idx_validation_errors_sym ON validation_errors(symbol);
+            CREATE INDEX IF NOT EXISTS idx_validation_errors_type ON validation_errors(error_type);
+
             CREATE INDEX IF NOT EXISTS idx_decision_signals_sym ON decision_signals(symbol, date DESC);
             CREATE INDEX IF NOT EXISTS idx_decision_signals_action ON decision_signals(action, date DESC);
 
@@ -411,11 +483,13 @@ def init_db():
             CREATE INDEX IF NOT EXISTS idx_market_live_sym ON market_live(symbol);
             CREATE INDEX IF NOT EXISTS idx_fundamentals_sym ON fundamentals(symbol);
             CREATE INDEX IF NOT EXISTS idx_indicators_sym ON indicators(symbol);
+            CREATE INDEX IF NOT EXISTS idx_pipeline_runs_started ON pipeline_runs(started_at DESC);
         """)
 
         # Migration check for existing tables missing new timestamp columns
         tables_to_check = {
             "stock_grid": ["as_of", "updated_at"],
+            "stock_grid_staging": ["as_of", "updated_at"],
             "portfolio_snapshots": ["as_of", "updated_at"],
             "fii_dii_history": ["as_of", "updated_at"],
             "institutional_flow": ["as_of", "updated_at"],
@@ -611,6 +685,363 @@ def upsert_stock_metrics(records: List[Dict[str, Any]]):
         cursor.executemany(query, param_rows)
         conn.commit()
     log.info(f"Upserted {len(records)} stocks into SQLite database in single batch")
+
+
+def upsert_stock_metrics_staging(records: List[Dict[str, Any]]) -> int:
+    """High-throughput batch insert or update of stock metrics into stock_grid_staging table."""
+    if not records:
+        return 0
+
+    init_db()
+    param_rows = []
+    for r in records:
+        close = float(r.get("close", 0.0) or 0.0)
+        mcap = float(r.get("market_cap_cr", 0.0) or 0.0) if r.get("market_cap_cr") else None
+        cat = r.get("cap_category") or classify_market_cap(close, mcap)
+
+        param_rows.append((
+            r.get("symbol"),
+            r.get("name", r.get("symbol", "").replace(".NS", "")),
+            r.get("sector", "Equity"),
+            cat,
+            close,
+            float(r.get("change_pct", 0.0) or 0.0),
+            int(r.get("volume", 0) or 0),
+            int(r.get("traded_qty", 0) or 0),
+            int(r.get("delivered_qty", 0) or 0),
+            float(r.get("delivery_pct", 0.0) or 0.0),
+            float(r.get("rsi", 50.0) or 50.0),
+            r.get("macd_status") or ("BULLISH" if r.get("macd_bullish") else "NEUTRAL"),
+            1 if r.get("above_50dma") else 0,
+            1 if r.get("above_200dma") else 0,
+            float(r.get("pct_from_52w_high", 0.0) or 0.0),
+            float(r.get("pe", 0.0) or 0.0),
+            float(r.get("pb", 0.0) or 0.0),
+            float(r.get("roe", 0.0) or 0.0),
+            float(r.get("roce", 0.0) or 0.0),
+            mcap or 0.0,
+            float(r.get("composite_score", 50.0) or 50.0),
+            r.get("action", "HOLD"),
+            float(r.get("target_price", 0.0) or 0.0),
+            float(r.get("stop_loss", 0.0) or 0.0),
+            float(r.get("rr_ratio", 2.0) or 2.0),
+            float(r.get("ev_pct", 3.5) or 3.5),
+            float(r.get("net_alpha_pct", 0.0) or 0.0),
+        ))
+
+    query = """
+        INSERT INTO stock_grid_staging (
+            symbol, name, sector, cap_category, close, change_pct, volume,
+            traded_qty, delivered_qty, delivery_pct, rsi, macd_status,
+            above_50dma, above_200dma, pct_from_52w_high, pe, pb, roe, roce,
+            market_cap_cr, composite_score, action, target_price, stop_loss,
+            rr_ratio, ev_pct, net_alpha_pct, updated_at
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
+        ON CONFLICT(symbol) DO UPDATE SET
+            name=excluded.name,
+            sector=excluded.sector,
+            cap_category=excluded.cap_category,
+            close=excluded.close,
+            change_pct=excluded.change_pct,
+            volume=excluded.volume,
+            traded_qty=excluded.traded_qty,
+            delivered_qty=excluded.delivered_qty,
+            delivery_pct=excluded.delivery_pct,
+            rsi=excluded.rsi,
+            macd_status=excluded.macd_status,
+            above_50dma=excluded.above_50dma,
+            above_200dma=excluded.above_200dma,
+            pct_from_52w_high=excluded.pct_from_52w_high,
+            pe=excluded.pe,
+            pb=excluded.pb,
+            roe=excluded.roe,
+            roce=excluded.roce,
+            market_cap_cr=excluded.market_cap_cr,
+            composite_score=excluded.composite_score,
+            action=excluded.action,
+            target_price=excluded.target_price,
+            stop_loss=excluded.stop_loss,
+            rr_ratio=excluded.rr_ratio,
+            ev_pct=excluded.ev_pct,
+            net_alpha_pct=excluded.net_alpha_pct,
+            updated_at=CURRENT_TIMESTAMP
+    """
+
+    with get_connection() as conn:
+        cursor = conn.cursor()
+        cursor.executemany(query, param_rows)
+        conn.commit()
+    log.info(f"Upserted {len(param_rows)} stocks into stock_grid_staging in single batch")
+    return len(param_rows)
+
+
+def atomic_publish_stock_grid(run_id: str, min_expected_rows: int = 100) -> bool:
+    """
+    Checks staging table row count (>= min_expected_rows) and executes atomic swap:
+      ALTER TABLE stock_grid RENAME TO stock_grid_old;
+      ALTER TABLE stock_grid_staging RENAME TO stock_grid;
+      DROP TABLE IF EXISTS stock_grid_old;
+      Re-creates empty stock_grid_staging and indexes.
+    If row count is zero or error occurs, rollback and NEVER corrupt production stock_grid.
+    Returns True if published, False on rollback.
+    """
+    init_db()
+    conn = get_connection()
+    try:
+        cursor = conn.cursor()
+        cursor.execute("SELECT COUNT(*) as cnt FROM stock_grid_staging")
+        row = cursor.fetchone()
+        staging_count = row["cnt"] if row else 0
+
+        if staging_count < min_expected_rows:
+            log.warning(
+                f"[AtomicPublish] Staging table has {staging_count} rows, below minimum {min_expected_rows}. "
+                f"Aborting atomic swap to prevent data loss."
+            )
+            update_pipeline_run(
+                run_id,
+                status="FAILED",
+                error_summary=f"Staging row count {staging_count} < min_expected_rows {min_expected_rows}"
+            )
+            conn.close()
+            return False
+
+        # Execute atomic swap inside explicit transaction
+        conn.isolation_level = None
+        cursor.execute("BEGIN IMMEDIATE")
+
+        # Double check inside transaction lock
+        cursor.execute("SELECT COUNT(*) as cnt FROM stock_grid_staging")
+        current_cnt = cursor.fetchone()["cnt"]
+        if current_cnt < min_expected_rows:
+            cursor.execute("ROLLBACK")
+            conn.close()
+            return False
+
+        # Drop leftover old table if any
+        cursor.execute("DROP TABLE IF EXISTS stock_grid_old")
+
+        # Atomic table rename
+        cursor.execute("ALTER TABLE stock_grid RENAME TO stock_grid_old")
+        cursor.execute("ALTER TABLE stock_grid_staging RENAME TO stock_grid")
+        cursor.execute("DROP TABLE IF EXISTS stock_grid_old")
+
+        # Re-create empty stock_grid_staging
+        cursor.execute("""
+            CREATE TABLE IF NOT EXISTS stock_grid_staging (
+                symbol TEXT PRIMARY KEY,
+                name TEXT,
+                sector TEXT,
+                cap_category TEXT,
+                close REAL,
+                change_pct REAL,
+                volume INTEGER,
+                traded_qty INTEGER,
+                delivered_qty INTEGER,
+                delivery_pct REAL,
+                rsi REAL,
+                macd_status TEXT,
+                above_50dma INTEGER,
+                above_200dma INTEGER,
+                pct_from_52w_high REAL,
+                pe REAL,
+                pb REAL,
+                roe REAL,
+                roce REAL,
+                market_cap_cr REAL,
+                composite_score REAL,
+                action TEXT,
+                target_price REAL,
+                stop_loss REAL,
+                rr_ratio REAL,
+                ev_pct REAL,
+                net_alpha_pct REAL,
+                as_of DATETIME DEFAULT CURRENT_TIMESTAMP,
+                updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
+            )
+        """)
+
+        # Re-create indexes on newly swapped stock_grid
+        cursor.execute("CREATE INDEX IF NOT EXISTS idx_cap_category ON stock_grid(cap_category)")
+        cursor.execute("CREATE INDEX IF NOT EXISTS idx_composite_score ON stock_grid(composite_score DESC)")
+        cursor.execute("CREATE INDEX IF NOT EXISTS idx_delivery_pct ON stock_grid(delivery_pct DESC)")
+        cursor.execute("CREATE INDEX IF NOT EXISTS idx_rsi ON stock_grid(rsi)")
+        cursor.execute("CREATE INDEX IF NOT EXISTS idx_pe ON stock_grid(pe)")
+        cursor.execute("CREATE INDEX IF NOT EXISTS idx_action ON stock_grid(action)")
+
+        cursor.execute("COMMIT")
+        log.info(f"[AtomicPublish] Successfully published {staging_count} rows from staging to production stock_grid (run: {run_id})")
+        return True
+
+    except Exception as exc:
+        log.error(f"[AtomicPublish] Failed atomic swap for run {run_id}: {exc}. Rolling back.")
+        try:
+            cursor.execute("ROLLBACK")
+        except Exception:
+            pass
+        update_pipeline_run(run_id, status="FAILED", error_summary=f"Atomic publish swap exception: {exc}")
+        return False
+    finally:
+        conn.close()
+
+
+def create_pipeline_run(
+    run_id: str,
+    universe_mode: str = "ALL",
+    config_dict: Optional[Dict[str, Any]] = None
+) -> None:
+    """Creates a new pipeline run audit record in pipeline_runs."""
+    init_db()
+    started_at = datetime.now(timezone.utc).isoformat()
+    with get_connection() as conn:
+        cursor = conn.cursor()
+        cursor.execute("""
+            INSERT INTO pipeline_runs (
+                run_id, started_at, status, universe_mode, quality_score, duration_seconds
+            ) VALUES (?, ?, 'INITIALIZING', ?, 100.0, 0.0)
+            ON CONFLICT(run_id) DO UPDATE SET
+                started_at=excluded.started_at,
+                status=excluded.status,
+                universe_mode=excluded.universe_mode
+        """, (run_id, started_at, universe_mode))
+        conn.commit()
+    log.info(f"Created pipeline run audit record: {run_id} (Universe: {universe_mode})")
+
+
+def update_pipeline_run(run_id: str, **kwargs) -> None:
+    """Updates fields on an existing pipeline run."""
+    if not kwargs:
+        return
+    init_db()
+    allowed_cols = {
+        "completed_at", "status", "universe_mode", "discovered_count",
+        "processed_count", "success_count", "failed_count", "quality_score",
+        "duration_seconds", "error_summary"
+    }
+    valid_updates = {k: v for k, v in kwargs.items() if k in allowed_cols}
+    if not valid_updates:
+        return
+
+    set_clauses = [f"{col} = ?" for col in valid_updates.keys()]
+    values = list(valid_updates.values())
+    values.append(run_id)
+
+    query = f"UPDATE pipeline_runs SET {', '.join(set_clauses)} WHERE run_id = ?"
+    with get_connection() as conn:
+        cursor = conn.cursor()
+        cursor.execute(query, values)
+        conn.commit()
+
+
+def get_pipeline_run(run_id: str) -> Optional[Dict[str, Any]]:
+    """Retrieves a single pipeline run by run_id."""
+    init_db()
+    with get_connection() as conn:
+        cursor = conn.cursor()
+        cursor.execute("SELECT * FROM pipeline_runs WHERE run_id = ?", (run_id,))
+        row = cursor.fetchone()
+        return dict(row) if row else None
+
+
+def get_recent_pipeline_runs(limit: int = 20) -> List[Dict[str, Any]]:
+    """Retrieves recent pipeline runs ordered by started_at DESC."""
+    init_db()
+    with get_connection() as conn:
+        cursor = conn.cursor()
+        cursor.execute("SELECT * FROM pipeline_runs ORDER BY started_at DESC LIMIT ?", (limit,))
+        return [dict(r) for r in cursor.fetchall()]
+
+
+def acquire_pipeline_lock(run_id: str, timeout_seconds: int = 7200) -> bool:
+    """
+    Acquires execution lock for a pipeline run in pipeline_lock table.
+    Prevents concurrent overlapping runs. Automatically recovers if previous lock expired.
+    Returns True if lock acquired/held, False if held by an active run.
+    """
+    init_db()
+    with get_connection() as conn:
+        cursor = conn.cursor()
+        cursor.execute("SELECT run_id, acquired_at, expires_at FROM pipeline_lock WHERE lock_id = 1")
+        row = cursor.fetchone()
+
+        now_dt = datetime.now(timezone.utc)
+        now_str = now_dt.isoformat()
+        exp_dt = datetime.fromtimestamp(now_dt.timestamp() + timeout_seconds, timezone.utc)
+        exp_str = exp_dt.isoformat()
+
+        if row is None:
+            cursor.execute(
+                "INSERT INTO pipeline_lock (lock_id, run_id, acquired_at, expires_at) VALUES (1, ?, ?, ?)",
+                (run_id, now_str, exp_str)
+            )
+            conn.commit()
+            log.info(f"Acquired pipeline lock for run {run_id}")
+            return True
+
+        current_holder = row["run_id"]
+        if current_holder == run_id:
+            cursor.execute(
+                "UPDATE pipeline_lock SET expires_at = ? WHERE lock_id = 1",
+                (exp_str,)
+            )
+            conn.commit()
+            return True
+
+        # Check if lock has expired
+        is_expired = False
+        if row["expires_at"]:
+            try:
+                lock_exp = datetime.fromisoformat(row["expires_at"])
+                if lock_exp.tzinfo is None:
+                    lock_exp = lock_exp.replace(tzinfo=timezone.utc)
+                if now_dt >= lock_exp:
+                    is_expired = True
+            except Exception:
+                is_expired = True
+        elif row["acquired_at"]:
+            try:
+                lock_acq = datetime.fromisoformat(row["acquired_at"])
+                if lock_acq.tzinfo is None:
+                    lock_acq = lock_acq.replace(tzinfo=timezone.utc)
+                if (now_dt - lock_acq).total_seconds() > timeout_seconds:
+                    is_expired = True
+            except Exception:
+                is_expired = True
+
+        if is_expired:
+            log.warning(f"Previous pipeline lock by {current_holder} expired. Reclaiming lock for {run_id}.")
+            cursor.execute(
+                "UPDATE pipeline_lock SET run_id = ?, acquired_at = ?, expires_at = ? WHERE lock_id = 1",
+                (run_id, now_str, exp_str)
+            )
+            conn.commit()
+            return True
+
+        log.warning(f"Pipeline lock is held by active run {current_holder}. Run {run_id} denied lock.")
+        return False
+
+
+def release_pipeline_lock(run_id: str) -> bool:
+    """
+    Releases execution lock held by run_id.
+    Returns True if successfully released, False if held by another run.
+    """
+    init_db()
+    with get_connection() as conn:
+        cursor = conn.cursor()
+        cursor.execute("SELECT run_id FROM pipeline_lock WHERE lock_id = 1")
+        row = cursor.fetchone()
+        if not row:
+            return True
+        if row["run_id"] == run_id:
+            cursor.execute("DELETE FROM pipeline_lock WHERE lock_id = 1")
+            conn.commit()
+            log.info(f"Released pipeline lock for run {run_id}")
+            return True
+        else:
+            log.warning(f"Cannot release pipeline lock: held by {row['run_id']}, not {run_id}")
+            return False
+
 
 def get_historical_comparable_events(security_id: str, context: Optional[dict] = None, event_ids: Optional[list] = None) -> List[Dict[str, Any]]:
     """Retrieve historical comparable events data for a security."""

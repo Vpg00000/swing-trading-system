@@ -40,11 +40,13 @@ logging.basicConfig(level=logging.INFO, format="%(levelname)s  %(message)s")
 def run_full_sync(
     symbols: list[str] | None = None,
     clean_slate: bool = False,
-    universe_mode: str = "ALL"
+    universe_mode: str = "ALL",
+    run_id: str | None = None
 ) -> dict:
     """
     Executes complete end-to-end data update across full market universe
-    (5,000 to 20,000 stocks), supports clean-slate purging, and populates SQLite.
+    (5,000 to 20,000 stocks), supports clean-slate purging, and populates SQLite
+    via atomic swap through staging tables to prevent corrupt production data.
     """
     start_time = time.time()
 
@@ -74,9 +76,21 @@ def run_full_sync(
     # Step 4: High-Performance Parallel Batch Analytics
     records = run_parallel_analysis(universe_meta)
 
-    # Step 5: High-Throughput Batch upsert into SQLite Database
+    # Step 5: High-Throughput Staging & Atomic Swap into SQLite Database
     init_db()
-    upsert_stock_metrics(records)
+    from data.database import upsert_stock_metrics_staging, atomic_publish_stock_grid, upsert_stock_metrics
+    
+    staged_count = upsert_stock_metrics_staging(records)
+    log.info(f"Staged {staged_count} records into stock_grid_staging.")
+    
+    # Execute atomic publication
+    min_expected = min(50, len(records))
+    published = atomic_publish_stock_grid(run_id=run_id or "RUN_SYNC", min_expected_rows=min_expected)
+    if published:
+        log.info("✓ Atomic swap succeeded: stock_grid published cleanly without downtime.")
+    else:
+        log.warning("⚠ Atomic swap rolled back; using fallback direct upsert to preserve records.")
+        upsert_stock_metrics(records)
 
     elapsed = round(time.time() - start_time, 2)
     log.info(f"✓ One-Click Full Market Sync Complete! Processed {len(records)} stocks in {elapsed}s.")

@@ -29,6 +29,7 @@ logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(me
 # Tables that store transient analysis and market data to be purged on clean slate
 ANALYSIS_TABLES = [
     "stock_grid",
+    "stock_grid_staging",
     "market_data",
     "market_live",
     "indicators",
@@ -51,7 +52,9 @@ PROTECTED_TABLES = [
     "auth_users",
     "watchlists",
     "system_logs",
-    "schema_migrations"
+    "schema_migrations",
+    "pipeline_runs",
+    "pipeline_lock"
 ]
 
 CACHE_DIRS = [
