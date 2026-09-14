@@ -527,85 +527,90 @@ def classify_market_cap(close: float, mcap_cr: Optional[float] = None, rank: Opt
     return "MICRO"
 
 def upsert_stock_metrics(records: List[Dict[str, Any]]):
-    """Batch insert or update stock metrics into SQLite database."""
+    """High-throughput batch insert or update of stock metrics into SQLite database."""
     if not records:
         return
 
     init_db()
+    param_rows = []
+    for r in records:
+        close = float(r.get("close", 0.0) or 0.0)
+        mcap = float(r.get("market_cap_cr", 0.0) or 0.0) if r.get("market_cap_cr") else None
+        cat = r.get("cap_category") or classify_market_cap(close, mcap)
+
+        param_rows.append((
+            r.get("symbol"),
+            r.get("name", r.get("symbol", "").replace(".NS", "")),
+            r.get("sector", "Equity"),
+            cat,
+            close,
+            float(r.get("change_pct", 0.0) or 0.0),
+            int(r.get("volume", 0) or 0),
+            int(r.get("traded_qty", 0) or 0),
+            int(r.get("delivered_qty", 0) or 0),
+            float(r.get("delivery_pct", 0.0) or 0.0),
+            float(r.get("rsi", 50.0) or 50.0),
+            r.get("macd_status") or ("BULLISH" if r.get("macd_bullish") else "NEUTRAL"),
+            1 if r.get("above_50dma") else 0,
+            1 if r.get("above_200dma") else 0,
+            float(r.get("pct_from_52w_high", 0.0) or 0.0),
+            float(r.get("pe", 0.0) or 0.0),
+            float(r.get("pb", 0.0) or 0.0),
+            float(r.get("roe", 0.0) or 0.0),
+            float(r.get("roce", 0.0) or 0.0),
+            mcap or 0.0,
+            float(r.get("composite_score", 50.0) or 50.0),
+            r.get("action", "HOLD"),
+            float(r.get("target_price", 0.0) or 0.0),
+            float(r.get("stop_loss", 0.0) or 0.0),
+            float(r.get("rr_ratio", 2.0) or 2.0),
+            float(r.get("ev_pct", 3.5) or 3.5),
+            float(r.get("net_alpha_pct", 0.0) or 0.0),
+        ))
+
+    query = """
+        INSERT INTO stock_grid (
+            symbol, name, sector, cap_category, close, change_pct, volume,
+            traded_qty, delivered_qty, delivery_pct, rsi, macd_status,
+            above_50dma, above_200dma, pct_from_52w_high, pe, pb, roe, roce,
+            market_cap_cr, composite_score, action, target_price, stop_loss,
+            rr_ratio, ev_pct, net_alpha_pct, updated_at
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
+        ON CONFLICT(symbol) DO UPDATE SET
+            name=excluded.name,
+            sector=excluded.sector,
+            cap_category=excluded.cap_category,
+            close=excluded.close,
+            change_pct=excluded.change_pct,
+            volume=excluded.volume,
+            traded_qty=excluded.traded_qty,
+            delivered_qty=excluded.delivered_qty,
+            delivery_pct=excluded.delivery_pct,
+            rsi=excluded.rsi,
+            macd_status=excluded.macd_status,
+            above_50dma=excluded.above_50dma,
+            above_200dma=excluded.above_200dma,
+            pct_from_52w_high=excluded.pct_from_52w_high,
+            pe=excluded.pe,
+            pb=excluded.pb,
+            roe=excluded.roe,
+            roce=excluded.roce,
+            market_cap_cr=excluded.market_cap_cr,
+            composite_score=excluded.composite_score,
+            action=excluded.action,
+            target_price=excluded.target_price,
+            stop_loss=excluded.stop_loss,
+            rr_ratio=excluded.rr_ratio,
+            ev_pct=excluded.ev_pct,
+            net_alpha_pct=excluded.net_alpha_pct,
+            updated_at=CURRENT_TIMESTAMP
+    """
+
     with get_connection() as conn:
         cursor = conn.cursor()
-        for r in records:
-            close = float(r.get("close", 0.0) or 0.0)
-            mcap = float(r.get("market_cap_cr", 0.0) or 0.0) if r.get("market_cap_cr") else None
-            cat = r.get("cap_category") or classify_market_cap(close, mcap)
-
-            cursor.execute("""
-                INSERT INTO stock_grid (
-                    symbol, name, sector, cap_category, close, change_pct, volume,
-                    traded_qty, delivered_qty, delivery_pct, rsi, macd_status,
-                    above_50dma, above_200dma, pct_from_52w_high, pe, pb, roe, roce,
-                    market_cap_cr, composite_score, action, target_price, stop_loss,
-                    rr_ratio, ev_pct, net_alpha_pct, updated_at
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
-                ON CONFLICT(symbol) DO UPDATE SET
-                    name=excluded.name,
-                    sector=excluded.sector,
-                    cap_category=excluded.cap_category,
-                    close=excluded.close,
-                    change_pct=excluded.change_pct,
-                    volume=excluded.volume,
-                    traded_qty=excluded.traded_qty,
-                    delivered_qty=excluded.delivered_qty,
-                    delivery_pct=excluded.delivery_pct,
-                    rsi=excluded.rsi,
-                    macd_status=excluded.macd_status,
-                    above_50dma=excluded.above_50dma,
-                    above_200dma=excluded.above_200dma,
-                    pct_from_52w_high=excluded.pct_from_52w_high,
-                    pe=excluded.pe,
-                    pb=excluded.pb,
-                    roe=excluded.roe,
-                    roce=excluded.roce,
-                    market_cap_cr=excluded.market_cap_cr,
-                    composite_score=excluded.composite_score,
-                    action=excluded.action,
-                    target_price=excluded.target_price,
-                    stop_loss=excluded.stop_loss,
-                    rr_ratio=excluded.rr_ratio,
-                    ev_pct=excluded.ev_pct,
-                    net_alpha_pct=excluded.net_alpha_pct,
-                    updated_at=CURRENT_TIMESTAMP
-            """, (
-                r.get("symbol"),
-                r.get("name", r.get("symbol", "").replace(".NS", "")),
-                r.get("sector", "Equity"),
-                cat,
-                close,
-                float(r.get("change_pct", 0.0) or 0.0),
-                int(r.get("volume", 0) or 0),
-                int(r.get("traded_qty", 0) or 0),
-                int(r.get("delivered_qty", 0) or 0),
-                float(r.get("delivery_pct", 0.0) or 0.0),
-                float(r.get("rsi", 50.0) or 50.0),
-                "BULLISH" if r.get("macd_bullish") else "NEUTRAL",
-                1 if r.get("above_50dma") else 0,
-                1 if r.get("above_200dma") else 0,
-                float(r.get("pct_from_52w_high", 0.0) or 0.0),
-                float(r.get("pe", 0.0) or 0.0),
-                float(r.get("pb", 0.0) or 0.0),
-                float(r.get("roe", 0.0) or 0.0),
-                float(r.get("roce", 0.0) or 0.0),
-                mcap or 0.0,
-                float(r.get("composite_score", 50.0) or 50.0),
-                r.get("action", "HOLD"),
-                float(r.get("target_price", 0.0) or 0.0),
-                float(r.get("stop_loss", 0.0) or 0.0),
-                float(r.get("rr_ratio", 2.0) or 2.0),
-                float(r.get("ev_pct", 3.5) or 3.5),
-                float(r.get("net_alpha_pct", 0.0) or 0.0),
-            ))
+        cursor.executemany(query, param_rows)
         conn.commit()
-    log.info(f"Upserted {len(records)} stocks into SQLite database")
+    log.info(f"Upserted {len(records)} stocks into SQLite database in single batch")
 
 def get_historical_comparable_events(security_id: str, context: Optional[dict] = None, event_ids: Optional[list] = None) -> List[Dict[str, Any]]:
     """Retrieve historical comparable events data for a security."""

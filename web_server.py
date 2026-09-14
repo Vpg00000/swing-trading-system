@@ -632,14 +632,13 @@ async def stream_execution_logs():
                         "new_logs": new_entries
                     }
                     yield f"data: {json.dumps(payload)}\n\n"
-
+                    await asyncio.sleep(0.02)
                 else:
-                    # Only send heartbeat every 5 seconds when idle (not every 0.5s)
-                    await asyncio.sleep(2.0)
-                    if not EXECUTION_STATE.get("is_running", False):
-                        await asyncio.sleep(3.0)  # Extra delay when system idle
+                    if EXECUTION_STATE.get("is_running", False):
+                        await asyncio.sleep(0.1)
+                    else:
+                        await asyncio.sleep(1.5)
                     continue
-                await asyncio.sleep(0.5)
         finally:
             ACTIVE_SSE_CONNECTIONS = max(0, ACTIVE_SSE_CONNECTIONS - 1)
 
@@ -713,8 +712,24 @@ async def stream_live_prices(
 
 
 
+@app.post("/api/pipeline/purge")
+async def purge_all_data():
+    """Explicitly purge all analysis caches, database tables, and in-memory caches."""
+    try:
+        from engine.data_purge import clean_slate_wipe
+        res = clean_slate_wipe()
+        invalidate_grid_stocks_cache()
+        return JSONResponse(content=res)
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail=str(exc))
+
+
 @app.api_route("/api/pipeline/run", methods=["GET", "POST"])
-async def run_main_pipeline():
+async def run_main_pipeline(
+    payload: Optional[Dict[str, Any]] = Body(None),
+    clean_slate: Optional[bool] = Query(None),
+    universe: Optional[str] = Query(None)
+):
     """Trigger full python main.py pipeline execution from Web UI button with stdout/stderr streaming."""
     global PIPELINE_STATUS, EXECUTION_STATE
     if PIPELINE_STATUS["is_running"] or EXECUTION_STATE["is_running"]:
@@ -724,6 +739,10 @@ async def run_main_pipeline():
             "pipeline_status": PIPELINE_STATUS,
             "execution_state": EXECUTION_STATE
         })
+
+    # Resolve options from payload or query params (default to clean-slate and full market)
+    cs = payload.get("clean_slate") if (payload and "clean_slate" in payload) else (clean_slate if clean_slate is not None else True)
+    uni = (payload.get("universe") if payload else None) or universe or "ALL"
 
     PIPELINE_STATUS["is_running"] = True
     PIPELINE_STATUS["last_status"] = "EXECUTING"
@@ -735,12 +754,19 @@ async def run_main_pipeline():
     EXECUTION_STATE["logs"] = []
     
     start_iso = datetime.datetime.now(datetime.timezone.utc).isoformat()
-    append_execution_log("PIPELINE", "INFO", f"Launching main.py pipeline at {start_iso}...")
+    append_execution_log("PIPELINE", "INFO", f"Launching clean-slate main.py pipeline (Universe: {uni}, Clean-Slate: {cs}) at {start_iso}...")
 
     def _execute_pipeline_task():
         global PIPELINE_STATUS, EXECUTION_STATE
         try:
             cmd = [sys.executable, "-u", str(PROJECT_ROOT / "main.py")]
+            if cs:
+                cmd.append("--clean-slate")
+            else:
+                cmd.append("--no-clean")
+            if uni:
+                cmd.extend(["--universe", str(uni)])
+
             append_execution_log("PIPELINE", "INFO", f"Executing command: {' '.join(cmd)}")
             
             env = dict(os.environ)

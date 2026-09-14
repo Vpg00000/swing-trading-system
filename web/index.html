@@ -85,7 +85,7 @@
                 <i class="fa-solid fa-stethoscope"></i> DIAGNOSTICS
             </button>
             <!-- Header buttons with Keyboard Shortcut Hints (T-324) -->
-            <button class="refresh-btn" id="btnRunPipeline" title="Execute main.py pipeline (⌘R)" aria-label="Run Main Pipeline" style="background: rgba(16, 185, 129, 0.15); border: 1px solid var(--neon-emerald); color: var(--neon-emerald); font-weight: 700;">
+            <button class="refresh-btn" id="btnRunPipeline" title="Execute Clean-Slate 5,000+ Stock Pipeline (⌘R)" aria-label="Run Main Pipeline" style="background: rgba(16, 185, 129, 0.15); border: 1px solid var(--neon-emerald); color: var(--neon-emerald); font-weight: 700;">
                 <i class="fa-solid fa-rocket"></i> RUN MAIN PIPELINE <kbd class="kbd-hint">⌘R</kbd>
             </button>
             <button class="refresh-btn" id="btnRunBacktest" title="Run Backtest Simulation (⌘B)" aria-label="Run Backtest" style="background: rgba(59, 130, 246, 0.15); border: 1px solid #3b82f6; color: #60a5fa; font-weight: 600;">
@@ -2085,6 +2085,12 @@
                     <span id="modalExecStatusBadge" class="status-badge active" style="font-size: 0.75rem; padding: 2px 8px; border-radius: 12px; background: rgba(16,185,129,0.2); color: #10b981; border: 1px solid #10b981;">
                         <i class="fa-solid fa-spinner fa-spin"></i> RUNNING
                     </span>
+                    <span id="modalUniverseBadge" class="status-badge" style="font-size: 0.75rem; padding: 2px 8px; border-radius: 12px; background: rgba(168,85,247,0.15); color: #c084fc; border: 1px solid #a855f7;">
+                        <i class="fa-solid fa-layer-group"></i> 5,000+ UNIVERSE
+                    </span>
+                    <span id="modalPurgeBadge" class="status-badge" style="font-size: 0.75rem; padding: 2px 8px; border-radius: 12px; background: rgba(239,68,68,0.15); color: #f87171; border: 1px solid #ef4444;">
+                        <i class="fa-solid fa-broom"></i> CLEAN-SLATE
+                    </span>
                     <!-- Elapsed Time Counter (T-331) -->
                     <span id="modalExecElapsedTime" class="font-mono text-xs" style="color: var(--color-mint);"><i class="fa-regular fa-clock"></i> 00:00s</span>
                 </div>
@@ -2111,11 +2117,12 @@
 
             <!-- Step-by-Step Progress Checklist (T-326) -->
             <div id="modalExecStepsList" class="exec-steps-list" style="display: flex; gap: 8px; padding: 8px 18px; background: rgba(0,0,0,0.5); border-bottom: 1px solid var(--border-color); overflow-x: auto; font-size: 0.75rem;">
-                <div class="exec-step-item pending" data-step="1"><i class="fa-regular fa-circle"></i> <span>1: Market Fetch</span></div>
-                <div class="exec-step-item pending" data-step="2"><i class="fa-regular fa-circle"></i> <span>2: TA Scoring</span></div>
-                <div class="exec-step-item pending" data-step="3"><i class="fa-regular fa-circle"></i> <span>3: AI Consensus</span></div>
-                <div class="exec-step-item pending" data-step="4"><i class="fa-regular fa-circle"></i> <span>4: Risk Sizing</span></div>
-                <div class="exec-step-item pending" data-step="5"><i class="fa-regular fa-circle"></i> <span>5: Dispatch</span></div>
+                <div class="exec-step-item pending" data-step="1"><i class="fa-regular fa-circle"></i> <span>1: Clean Purge</span></div>
+                <div class="exec-step-item pending" data-step="2"><i class="fa-regular fa-circle"></i> <span>2: 5K+ Discovery</span></div>
+                <div class="exec-step-item pending" data-step="3"><i class="fa-regular fa-circle"></i> <span>3: Parallel TA</span></div>
+                <div class="exec-step-item pending" data-step="4"><i class="fa-regular fa-circle"></i> <span>4: Regime & Risk</span></div>
+                <div class="exec-step-item pending" data-step="5"><i class="fa-regular fa-circle"></i> <span>5: AI Consensus</span></div>
+                <div class="exec-step-item pending" data-step="6"><i class="fa-regular fa-circle"></i> <span>6: Dispatch & Refresh</span></div>
             </div>
 
             <!-- Execution Progress Bar (T-150 & Modal UX) -->

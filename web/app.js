@@ -350,7 +350,7 @@ function switchTab(tabId) {
 window.virtualGridState = {
     data: [],
     rowHeight: 44,
-    buffer: 6,
+    buffer: 10,
     isTicking: false
 };
 
@@ -988,7 +988,7 @@ function updateExecModalStep(stepNum, status = 'completed') {
 }
 
 function resetExecModalSteps() {
-    for (let i = 1; i <= 5; i++) {
+    for (let i = 1; i <= 6; i++) {
         updateExecModalStep(i, 'pending');
     }
 }
@@ -1176,12 +1176,17 @@ function startTerminalLogStream(taskType) {
 
         allLoggedLineObjects.push({ text: msg, level, time: new Date() });
 
-        // T-326: Progress Checklist Automation
-        if (msg.includes('Fetch') || msg.includes('Market') || msg.includes('Symbols')) { updateExecModalStep(1, 'completed'); updateExecModalStep(2, 'active'); }
-        if (msg.includes('Technical') || msg.includes('TA') || msg.includes('Scoring') || msg.includes('RSI')) { updateExecModalStep(2, 'completed'); updateExecModalStep(3, 'active'); }
-        if (msg.includes('AI') || msg.includes('Consensus') || msg.includes('Gemini') || msg.includes('LLM')) { updateExecModalStep(3, 'completed'); updateExecModalStep(4, 'active'); }
-        if (msg.includes('Risk') || msg.includes('Allocation') || msg.includes('Sizing') || msg.includes('Guard')) { updateExecModalStep(4, 'completed'); updateExecModalStep(5, 'active'); }
-        if (msg.includes('Telegram') || msg.includes('Dispatch') || msg.includes('Broker')) { updateExecModalStep(5, 'completed'); }
+        // T-326: Progress Checklist Automation (6-Step Clean-Slate Pipeline)
+        if (msg.includes('[Step 1/6]') || msg.includes('Clean-Slate Purge')) { updateExecModalStep(1, 'active'); }
+        if (msg.includes('[Step 2/6]') || msg.includes('Universe Discovery')) { updateExecModalStep(1, 'completed'); updateExecModalStep(2, 'active'); }
+        if (msg.includes('[Step 3/6]') || msg.includes('Parallel Analytics') || msg.includes('Bulk Ingest')) { updateExecModalStep(2, 'completed'); updateExecModalStep(3, 'active'); }
+        if (msg.includes('[Step 4/6]') || msg.includes('Market Regime') || msg.includes('Risk Sizing')) { updateExecModalStep(3, 'completed'); updateExecModalStep(4, 'active'); }
+        if (msg.includes('[Step 5/6]') || msg.includes('Consensus Scan') || msg.includes('AI Multi-Model')) { updateExecModalStep(4, 'completed'); updateExecModalStep(5, 'active'); }
+        if (msg.includes('[Step 6/6]') || msg.includes('Refreshing daily') || msg.includes('Dispatch')) { updateExecModalStep(5, 'completed'); updateExecModalStep(6, 'active'); }
+
+        // Backward-compatible triggers
+        if (msg.includes('Market Fetch') || msg.includes('Symbols')) { updateExecModalStep(1, 'completed'); updateExecModalStep(2, 'completed'); updateExecModalStep(3, 'active'); }
+        if (msg.includes('Technical') || msg.includes('TA Scoring')) { updateExecModalStep(3, 'completed'); updateExecModalStep(4, 'active'); }
 
         const div = document.createElement('div');
         div.className = `log-line log-${level.toLowerCase()}`;
@@ -1246,7 +1251,7 @@ function startTerminalLogStream(taskType) {
                     execLogEventSource.close();
                     execLogEventSource = null;
 
-                    for (let i = 1; i <= 5; i++) updateExecModalStep(i, 'completed');
+                    for (let i = 1; i <= 6; i++) updateExecModalStep(i, 'completed');
                     removeBackgroundTask('exec_modal');
 
                     // T-334: Trigger Sound Chime
@@ -1289,7 +1294,7 @@ function startTerminalLogStream(taskType) {
                         badge.style.background = 'rgba(16,185,129,0.2)';
                         badge.style.color = '#10b981';
                     }
-                    for (let i = 1; i <= 5; i++) updateExecModalStep(i, 'completed');
+                    for (let i = 1; i <= 6; i++) updateExecModalStep(i, 'completed');
                     removeBackgroundTask('exec_modal');
 
                     // T-334: Sound chime
@@ -1302,6 +1307,7 @@ function startTerminalLogStream(taskType) {
         } catch(e) {}
     }, 600);
 }
+
 
 // ── Command Palette (Cmd+K) Toggle & Logic ──
 function executeCmdKAction(action) {
@@ -3294,12 +3300,22 @@ document.addEventListener('DOMContentLoaded', () => {
     const btnRunPipeline = document.getElementById('btnRunPipeline');
     if (btnRunPipeline) {
         btnRunPipeline.addEventListener('click', async () => {
-            showToast('Launching Main Pipeline...', 'info');
-            openExecutionModal('Main Pipeline Execution');
-            audioSynth.playOpportunityPing();
+            showToast('Launching Clean-Slate 5,000+ Stock Pipeline...', 'info');
+            openExecutionModal('Main Pipeline Execution (Clean-Slate 5,000+ Stocks)');
+            if (typeof audioSynth !== 'undefined' && audioSynth.playOpportunityPing) audioSynth.playOpportunityPing();
             try {
-                await fetch('/api/pipeline/run', { method: 'POST' });
-            } catch (e) {}
+                const res = await fetch('/api/pipeline/run', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ clean_slate: true, universe: 'ALL' })
+                });
+                const d = await res.json();
+                if (d.status === 'RUNNING') {
+                    showToast('Pipeline is already running in background.', 'info');
+                }
+            } catch (e) {
+                showToast('Failed to start pipeline: ' + e.message, 'error');
+            }
         });
     }
 
