@@ -44,29 +44,75 @@ class DhanLiveFeedService:
         self._init_cache()
 
     def _init_cache(self):
-        """Initializes live_cache with baseline last-close snapshots for all universe stocks from cached dataset."""
+        """Initializes live_cache with baseline last-close snapshots for all universe stocks from stock_grid database or cached dataset."""
         now_str = datetime.now(IST).isoformat()
         current_state = self.get_market_state()
 
+        # Load real prices from stock_grid database
+        grid_map = {}
+        try:
+            from data.database import get_connection
+            with get_connection() as conn:
+                cur = conn.cursor()
+                cur.execute("SELECT symbol, close, change_pct, volume FROM stock_grid")
+                for r in cur.fetchall():
+                    grid_map[r["symbol"]] = dict(r)
+                    clean_sym = r["symbol"].split(".")[0]
+                    grid_map[clean_sym] = dict(r)
+        except Exception as e:
+            log.warning(f"Could not load stock_grid for live cache: {e}")
+
+        # Ensure symbols include all active stocks from stock_grid
+        if grid_map:
+            all_syms = set(self.symbols)
+            for s in grid_map:
+                if "." in s:
+                    all_syms.add(s)
+            self.symbols = list(all_syms)
+
         with self._lock:
             for sym in self.symbols:
-                base_p = 500.0
-                try:
-                    from data.fetch import load_cached
-                    df = load_cached(sym)
-                    if df is not None and not df.empty and "Close" in df.columns:
-                        base_p = round(float(df["Close"].iloc[-1]), 2)
-                except Exception as e:
-                    log.warning(f"Could not load cached price for {sym}: {e}")
+                base_p = None
+                vol = 50000
+                chg = 0.0
+
+                # 1. Try stock_grid database
+                if sym in grid_map:
+                    base_p = float(grid_map[sym]["close"])
+                    vol = int(grid_map[sym].get("volume") or 50000)
+                    chg = float(grid_map[sym].get("change_pct") or 0.0)
+                else:
+                    clean_sym = sym.split(".")[0]
+                    if clean_sym in grid_map:
+                        base_p = float(grid_map[clean_sym]["close"])
+                        vol = int(grid_map[clean_sym].get("volume") or 50000)
+                        chg = float(grid_map[clean_sym].get("change_pct") or 0.0)
+
+                # 2. Try disk CSV cache
+                if base_p is None:
+                    try:
+                        from data.fetch import load_cached
+                        df = load_cached(sym)
+                        if df is not None and not df.empty and "Close" in df.columns:
+                            base_p = round(float(df["Close"].iloc[-1]), 2)
+                            if "Volume" in df.columns:
+                                vol = int(df["Volume"].iloc[-1])
+                    except Exception as e:
+                        log.warning(f"Could not load cached price for {sym}: {e}")
+
+                # 3. Safe fallback if neither is available
+                if base_p is None or base_p <= 0:
+                    base_p = 100.0
 
                 self.live_cache[sym] = {
                     "symbol": sym,
                     "ltp": base_p,
-                    "volume": 50000,
+                    "volume": vol,
                     "open": round(base_p * 0.995, 2),
                     "high": round(base_p * 1.012, 2),
                     "low": round(base_p * 0.991, 2),
-                    "prev_close": round(base_p * 0.993, 2),
+                    "prev_close": round(base_p / (1 + chg / 100.0) if chg != -100 else base_p * 0.99, 2),
+                    "change_pct": chg,
                     "vwap": round(base_p * 1.002, 2),
                     "last_trade_time": now_str,
                     "updated_at": now_str,

@@ -2452,7 +2452,8 @@ def get_10k_grid_stocks(force_refresh: bool = False):
         if not r.get("name") or "Stock 0" in str(r.get("name")) or r.get("name") == raw_sym or r.get("name") == clean_sym:
             r["name"] = resolve_company_name(raw_sym)
         if "sentiment_score" not in r:
-            sc = float(r.get("composite_score", 50.0))
+            raw_sc = r.get("composite_score")
+            sc = float(raw_sc) if raw_sc is not None else 50.0
             sent_val = round((sc - 50.0) / 50.0, 2)
             r["sentiment_score"] = sent_val
             r["sentiment_label"] = "BULLISH" if sent_val >= 0.25 else ("BEARISH" if sent_val <= -0.25 else "NEUTRAL")
@@ -2504,7 +2505,7 @@ async def get_grid_stocks(
         if cap_filter and cap_filter.upper() != "ALL":
             c_upper = cap_filter.strip().upper()
             if c_upper == "PENNY":
-                filtered = [r for r in filtered if str(r.get("cap_category", "")).upper() == "PENNY" or float(r.get("close", 0.0)) < 50.0]
+                filtered = [r for r in filtered if str(r.get("cap_category", "")).upper() == "PENNY" or (r.get("close") is not None and float(r.get("close")) < 50.0)]
             else:
                 filtered = [r for r in filtered if str(r.get("cap_category", "")).upper() == c_upper]
 
